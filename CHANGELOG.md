@@ -30,7 +30,8 @@ merge request, is still to do.
     Code's 2-minute Bash limit. `remove` works after the user closed the worker's workspace.
   - `prompt` refuses a worker whose Claude did not load mcv's hooks (no `rules-loaded` marker from
     its SessionStart hook), which would otherwise work with no git rules and never report; the
-    message names the folder trust dialog first, the usual cause, which herdr reports as idle.
+    message names the folder trust dialog first, the usual cause, which herdr reports as idle
+    or blocked.
   - The base defaults to the only remote's default branch when no remote is called `origin`, and
     several remotes with no `origin` need `--base`, instead of branching from HEAD.
   - A relative `MCV_HOME` is made absolute before it reaches the worker.
@@ -51,17 +52,18 @@ merge request, is still to do.
   no secrets), then the project's own git rules, or common practice where a project has none.
 - `bin/mcv-watch <project>`: one event stream for Claude Code's Monitor tool. Prints only what is
   worth a coordinator turn, and on start the questions still open. A pending answer comes back as
-  a `deliver` event when the worker stops. One watcher per project: a second one exits at once,
+  a `deliver` event when the worker stops, once per pending line. One watcher per project: a second one exits at once,
   naming the first's pid. Survives damaged state, an
   unreadable log and herdr being down; stops at once on TERM.
 - `hooks/hooks.json`: SessionStart gives a worker its rules; PreToolUse refuses AskUserQuestion with
   directions to `mcv-status needs-decision`. Both do nothing unless `MCV_TASK` names a task mcv
   started.
 - `skills/mcv/SKILL.md`: the `/mcv` skill the coordinator follows. Builds `.claude/mcv.json` with the
-  user (proposing `base` and `context` where they matter), confirms every worker before starting
+  user (proposing `base` and `context` where they matter, at the top level or per repository
+  with an object entry that wins over them), confirms every worker before starting
   it, keeps at most `max_workers` active, labels questions `<task id> #<n>`, writes into each task
   the facts the worker cannot find itself, reads the worker's screen before sending an answer, and
   never answers a question or approves a dialog for the user.
-- Tests: 364 checks in `tests/`, against a fake herdr that does the git work for real, passing on
+- Tests: 369 checks in `tests/`, against a fake herdr that does the git work for real, passing on
   macOS (bash 3.2); the first 300 also on Ubuntu 24.04. Four adversarial QA passes; every fix came
   with a regression test that failed before it.

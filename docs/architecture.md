@@ -100,7 +100,9 @@ a minute old. The watch lock holds only a pid and counts as held while that pid 
 
 **Watcher state** (in `$MCV_WATCH_STATE`, a temporary folder by default), one line per task in
 `<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last kind> <gone>
-<owe>`, where owe marks a pending answer read while herdr was down.
+<owe> <delivered>`, where owe marks a pending answer read while herdr was down, and delivered is
+the log line up to which pending answers were already delivered, so each pending line is delivered
+once.
 The pane identifies the worker: a task removed and spawned again gets a new pane and a fresh start.
 
 ## Watcher events
@@ -141,9 +143,9 @@ Measured against herdr 0.9.5 (protocol 22) on macOS, 2026-11-06 and 2026-11-07.
 | Behaviour | Notes |
 |---|---|
 | `worktree create --cwd --branch --base --label --no-focus` | Returns workspace id, root pane id, worktree path. Reuses an existing branch without complaint, hence spawn's checks. Gives a branch made from a remote-tracking ref that ref as upstream. |
-| `agent start <name> --kind claude --pane <id> -- <claude args>` | In a folder Claude has not trusted, stops at the trust dialog (default answer "No, exit") and fails with `agent_not_ready`; once the user picks "Yes", the agent takes prompts. Claude (2.1.319) records that trust under the repository's main checkout, so every worktree of a trusted repository starts without the dialog; a trusted parent folder does not count. Behind the dialog herdr reports the agent `idle`, and the SessionStart hook has not run. Without the dialog, `rules-loaded` is already written when `agent start` returns. |
+| `agent start <name> --kind claude --pane <id> -- <claude args>` | In a folder Claude has not trusted, stops at the trust dialog (default answer "No, exit") and fails with `agent_not_ready`; once the user picks "Yes", the agent takes prompts. Claude (2.1.319) records that trust under the repository's main checkout, so every worktree of a trusted repository starts without the dialog; a trusted parent folder does not count. Behind the dialog herdr reports the agent `idle` or `blocked` (both seen), and the SessionStart hook has not run. Without the dialog, `rules-loaded` is already written when `agent start` returns. |
 | `agent prompt <name> <text> --wait [--until ...]` | Text starting with `-` is taken as text. Refuses an agent that is not idle or done. |
-| Claude exiting in its pane | herdr either drops the agent (`agent_not_found`) or lists it as done but refuses prompts (`agent_not_ready`). `pane read` still shows the screen. |
+| Claude exiting in its pane | herdr either drops the agent (`agent_not_found`) or lists it as done but refuses prompts (`agent_not_ready`, or `agent_not_running` as seen after `/exit`). `pane read` still shows the screen. |
 | `worktree remove --workspace <id>` | Removes the worktree and closes the workspace. After the user closes the workspace, it fails with `workspace_not_found`, and git removes the worktree instead. |
 | `status --json`, `integration status` | `doctor` requires herdr >= 0.9.5 and the Claude integration `current`; updating herdr does not refresh the integration. |
 | `--settings '{"env": ...}'` | Reaches both the hooks and the Bash tool of the worker. |
@@ -168,4 +170,5 @@ with every herdr window closed.
 
 ## Next
 
-- A coordinator over several projects at once: [ADR 0005](adr/0005-hub-coordinator.md) (proposed).
+- A coordinator over several projects at once: [ADR 0005](adr/0005-hub-coordinator.md). Its
+  per-repository config is built; the hub itself is still proposed.

@@ -122,6 +122,10 @@ expect "an empty answer refused" '[[ $rc -eq 2 ]]' "rc=$rc"
 expect "only the question was written" '[[ $(wc -l <"$log") -eq $((n_before + 1)) ]]' "$(tail -2 "$log")"
 env -u MCV_TASK "$S" --task shop/t1 answered "$q" "oat" >/dev/null
 
+# Text that is only escape sequences is empty once they are removed.
+"$S" needs-decision $'\e[31m\e[0m' >/dev/null 2>&1; rc=$?
+expect "a question of only escape sequences refused" '[[ $rc -eq 2 ]]' "rc=$rc"
+
 # Terminal escape sequences are removed whole, not left as "[31m".
 "$S" note $'\e[31mred\e[0m plain \e]0;title\a end' >/dev/null
 expect "escape sequences removed whole" '[[ "$(tail -1 "$log" | cut -f4)" == "red plain  end" ]]' "$(tail -1 "$log" | cut -f4 | od -c | head -3)"

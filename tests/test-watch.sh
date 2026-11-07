@@ -276,6 +276,17 @@ expect "deliver is not repeated while nothing changes" '[[ -z "$out" ]]' "$out"
 agents "b:p1,idle,3,brew-j"
 out="$(bpoll)"
 expect "done -> idle does not repeat deliver" '[[ -z "$out" ]]' "$out"
+# The coordinator sends the delivered answer; the worker's next turn can end
+# before the answer is recorded. That stop must not deliver it again.
+agents "b:p1,working,31,brew-j"; bpoll >/dev/null
+agents "b:p1,done,32,brew-j"
+out="$(bpoll)"
+expect "a stop after the deliver, before answered is recorded, does not deliver again" '[[ "$out" != *deliver* ]]' "$out"
+# A send that failed is recorded as pending again, and delivered again.
+bpend j q1 "per drink, rounded"
+out="$(bpoll)"
+expect "a new pending line for the same question is delivered" \
+  '[[ "$out" == *"brew/j${TAB}deliver${TAB}q1${TAB}per drink, rounded" && $(count "$out") -eq 1 ]]' "$out"
 bans j q1 "per drink"
 agents "b:p1,working,4,brew-j"; bpoll >/dev/null
 agents "b:p1,done,5,brew-j"

@@ -691,16 +691,22 @@ cmd_prompt() {
   [[ -n "$name" ]] || die "task $task has a damaged meta file ($d/meta)"
   # When Claude exits in its pane, herdr either drops the agent
   # (agent_not_found) or still lists it as done but refuses prompts
-  # (agent_not_ready). Both mean the same to the coordinator.
+  # (agent_not_ready, or agent_not_running from newer herdr). All mean the
+  # same to the coordinator.
   local gone_msg="worker $task is not running Claude any more (it exited, or never finished starting); read its screen, then remove it"
   if ! h_try agent get "$name"; then
-    [[ "$HERR_CODE" != agent_not_found ]] || die "$gone_msg"
+    [[ "$HERR_CODE" != agent_not_found && "$HERR_CODE" != agent_not_running ]] || die "$gone_msg"
     die "herdr agent get: $HERR_MSG"
   fi
   status="$(jfield "$HOUT" .result.agent.agent_status)"
   [[ -n "$status" ]] || die "herdr agent get gave unexpected output"
-  [[ "$status" == idle || "$status" == "done" ]] \
-    || die "worker $task is $status; prompt is only sent to a worker that has stopped (idle or done)"
+  if [[ "$status" != idle && "$status" != "done" ]]; then
+    # Behind Claude's folder trust question herdr reports idle or blocked,
+    # and the SessionStart hook has not run yet.
+    [[ -f "$d/rules-loaded" ]] \
+      || die "worker $task is $status and has not started its session yet: if its pane shows Claude's folder trust question, pick Yes there and prompt again"
+    die "worker $task is $status; prompt is only sent to a worker that has stopped (idle or done)"
+  fi
   # mcv's SessionStart hook leaves this marker. Without it the worker's
   # Claude did not load the mcv plugin, so it has no git rules, may use
   # AskUserQuestion and never writes the status log: give it no work.
@@ -714,7 +720,7 @@ cmd_prompt() {
   local -a waitopts=(--timeout "$timeout")
   [[ -z "$nowait" ]] || waitopts=(--until working --until blocked --timeout 15000)
   if ! h_try agent prompt "$name" "$text" --wait "${waitopts[@]}"; then
-    [[ "$HERR_CODE" != agent_not_ready ]] || die "$gone_msg"
+    [[ "$HERR_CODE" != agent_not_ready && "$HERR_CODE" != agent_not_running ]] || die "$gone_msg"
     die "herdr agent prompt: $HERR_MSG"
   fi
   # A worker that failed to start (e.g. at a trust dialog) and was then let
@@ -767,7 +773,7 @@ cmd_remove() {
       status="$(jfield "$HOUT" .result.agent.agent_status)"
       [[ "$status" != working && "$status" != blocked ]] \
         || die "worker $1 is $status; let it stop (or stop it in its herdr pane), then remove it"
-    elif [[ "$HERR_CODE" != agent_not_found ]]; then
+    elif [[ "$HERR_CODE" != agent_not_found && "$HERR_CODE" != agent_not_running ]]; then
       die "herdr agent get: $HERR_MSG"
     fi
   fi

@@ -81,6 +81,18 @@ Optional fields:
   repositories. See [What a worker has](#what-a-worker-has).
 - `max_workers` (default 2): how many workers run at once; the coordinator queues the rest.
 
+A repository whose settings differ from the rest gets an object instead of a path, and its own
+`base` or `context` wins over the top-level one; `"context": ""` gives it none. Say Brewly's
+`staff` app still branches from `origin/main` and needs nothing from the project folder:
+
+```json
+"repos": { "web": "web",
+           "api": "api",
+           "staff": { "path": "staff", "base": "origin/main", "context": "" } }
+```
+
+Paths are relative to the project folder, or absolute.
+
 Then ask for work in plain words ("the cart total in web ignores the oat-milk surcharge, fix it; and
 add a CSV export of loyalty points to api"). Before starting anything, the coordinator shows each
 worker it plans, with its task id, repo and branch, and waits for your yes. Questions arrive
@@ -110,7 +122,10 @@ H agents                                     # every herdr agent and its state
 H remove brewly/cart-fix                     # close it; the branch is kept
 ```
 
-Run `H` with no arguments for every command and option.
+Run `H` with no arguments for every command and option. By hand you also see what the coordinator
+would: `mcv-watch <project>` (next to `H`) prints each question and stop as it happens, and
+`mcv-status --task <project>/<id> answered q<n> "<answer>"` records an answer you sent with
+`prompt`. Run either with no arguments for its usage.
 
 - `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.

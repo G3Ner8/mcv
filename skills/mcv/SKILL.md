@@ -42,12 +42,28 @@ Skip this skill for:
 
    ```json
    { "project":     "<short-name>",
-     "repos":       { "<repo-name>": "<repo path, relative to the project root>" },
+     "repos":       { "<repo-name>": "<repo path>",
+                      "<repo-name>": { "path": "<repo path>",
+                                       "base": "<optional, this repo only>",
+                                       "context": "<optional, this repo only; \"\" for none>" } },
      "dispatch":    "<text sent to a new worker; {task} is replaced with the task>",
      "base":        "<optional: the ref workers branch from, e.g. origin/develop>",
-     "context":     "<optional: a folder, relative to the project root, workers may read>",
+     "context":     "<optional: a folder workers may read>",
      "max_workers": 2 }
    ```
+
+   A repo is a path, or an object with `path` and its own `base` or `context`, which win over
+   the top-level ones for that repo. `""` means none for that repo: `"context": ""` gives it no
+   context, and `"base": ""` lets it branch from its remote's default branch (pass no `--base`).
+   Paths, including `context`, are relative to the project root, absolute, or start with `~/`
+   (your home folder; expand it before passing it on). For each repo, its settings are: path from
+   the entry; `base` from the entry, else the top-level `base`, else none; `context` the same way.
+   These are mistakes in the file: name each to the user and do not guess:
+   - a key other than those in the schema, at the top level or in a repo object (`max_worker`);
+   - a repo value that is neither a string nor an object with a string `path`;
+   - a `base` or `context` that is not a string, or a `max_workers` that is not a whole number
+     above 0;
+   - a `context` inside a repo that is not the repo itself (`spawn` refuses it).
 
    Building it, one field at a time:
    - `project`: from the folder name, lowercase, letters, digits and `-` only, at most 12
@@ -61,12 +77,14 @@ Skip this skill for:
      refs/remotes/origin/HEAD`) with the branch its CLAUDE.md or CONTRIBUTING says work starts from,
      and with whether `origin/develop` exists. If they differ (the remote's default is `main` and
      work starts from `develop`, say), propose `base` and say why in one line: without it, workers
-     branch from the remote's default branch. If the repos disagree with each other, say that one
-     `base` cannot serve them all and suggest one coordinator per repo.
+     branch from the remote's default branch. If the repos disagree with each other, put the base
+     most of them use at the top level and give each other repo its own `base` in an object
+     entry.
    - `context`: only when the repos are subfolders of this one. Propose `"."` and explain in one
      line: workers then also read this folder's CLAUDE.md, CLAUDE.local.md and skills, which they
      otherwise lose because their worktrees live elsewhere. The user may decline if that file is
-     too broad for the workers; then you pass them what they need in the task text instead.
+     too broad for the workers; then you pass them what they need in the task text instead. A repo
+     that should not get it (one whose own notes are enough) takes `"context": ""` in its entry.
    - `max_workers`: 2. Each worker is a full Claude Code session; more at once costs more usage and
      machine, and their test runs compete.
 
@@ -99,7 +117,9 @@ Skip this skill for:
    repo's notes does not resolve from a worktree), a related branch. Facts, not a pointer to read a
    whole file.
 4. **Confirm before starting.** Show every worker you are about to start and wait for a yes. The
-   user may rename ids or branches here. At most `max_workers` (default 2) workers are active at
+   user may rename ids or branches here. When the repos' bases differ, add each worker's base
+   to its line (`branch fix/cart-total from origin/develop`); when their contexts differ, say
+   which workers get none (`no project notes`). At most `max_workers` (default 2) workers are active at
    once. A worker is active from its `spawn` until it reports `done` or `failed`, is `gone`, or is
    removed; waiting at a dialog or on a question still counts, and so does one whose Claude failed
    to start until the user lets it through or it is removed. Say which workers wait, and start them
@@ -113,9 +133,10 @@ Skip this skill for:
    OK? (names can be changed)
    ```
 5. **Start each worker.** `BIN/mcv-herdr.sh spawn <project> <id> <repo path> <branch>`, adding
-   `--base <base>` when the config has one and `--context <absolute path of context>` when it has
-   one, except for a repo that is the context folder itself (the project root listed among `repos`):
-   it already has that folder's notes, and `spawn` refuses a context inside the repository. It
+   `--base <base>` when that repo's settings have one and `--context <absolute path of context>`
+   when they have one, except for a repo that is the context folder itself (the project root listed
+   among `repos`): it already has that folder's notes, and `spawn` refuses a context inside the
+   repository. It
    prints the task, worktree, branch, base, context and how many files it copied from
    `.worktreeinclude`. If it fails, tell the user its one-line reason. If Claude failed to start, `BIN/mcv-herdr.sh read
    <project>/<id>` shows the screen: describe it. Usually it is Claude's folder trust dialog, whose
@@ -145,13 +166,13 @@ already relayed in this conversation is the same question: do not ask the user t
 |---|---|
 | `needs-decision qN <text>` | Relay it to the user as a labelled question (below). |
 | `blocked - <text>` (a log line) | The worker says it cannot continue. Tell the user why and ask what to do. |
-| `state blocked` | The worker stopped at a dialog on its screen. `read` it, describe in plain words what it wants (which command, which file, which question), and ask the user. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. |
+| `state blocked` | The worker stopped at a dialog on its screen. `read` it, describe in plain words what it wants (which command, which file, which question), and ask the user. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
 | `state done` | The worker's turn ended without a report. `read` its screen and summarise what it said. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. |
 | `done - <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
 | `failed - <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
 | `note - <text>` | Mention it in one line. |
-| `deliver qN <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 4 below). Send it as in step 2 of "Sending an answer", with this exact answer; do not ask the user again. |
-| `gone -` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. Start the next waiting worker, if any. |
+| `deliver qN <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 4 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `deliver` comes once per pending line. |
+| `gone -` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
 
 If `prompt` says a worker is not running Claude any more, handle it like `gone -`: `read` its screen
 for what it said last, tell the user, and offer `remove`.
@@ -195,7 +216,8 @@ Report per worker: id, repo and branch, state, open questions.
 ## Verification
 
 - After `spawn`: the printed JSON has the task, branch and base you confirmed with the user, and
-  the context the config names.
+  the context that repo's settings name (printed with symlinks resolved, so `/tmp` shows as
+  `/private/tmp` on macOS: compare the folder, not the spelling).
 - At no time are more than `max_workers` workers active.
 - After `prompt --no-wait`: the state is `working`, or `blocked` (then handle it as a dialog).
 - After every answer: the task's log has an `answered` line for that question id.

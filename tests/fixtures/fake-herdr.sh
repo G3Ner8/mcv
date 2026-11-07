@@ -17,7 +17,8 @@
 # State lives in FAKE_DIR. Every call appends its arguments to FAKE_DIR/calls.
 # FAKE_FAIL=create makes worktree create fail after creating the branch, as a
 # git lock failure half way does; FAKE_FAIL=start makes agent start fail;
-# FAKE_FAIL=notready makes agent prompt fail as it does once Claude has exited.
+# FAKE_FAIL=notready makes agent prompt fail as it does once Claude has exited;
+# FAKE_FAIL=notrunning with the code newer herdr gives for that.
 # FAKE_FAIL=partial makes worktree create report a workspace id but no pane;
 # FAKE_FAIL=garbage makes it print something that is not JSON (both after
 # creating the worktree).
@@ -125,6 +126,7 @@ case "${1:-} ${2:-}" in
     ;;
   "agent prompt")
     [[ "${FAKE_FAIL:-}" != notready ]] || fail agent_not_ready "$3 is not an active named agent"
+    [[ "${FAKE_FAIL:-}" != notrunning ]] || fail agent_not_running "$3 is not running"
     echo '{"result":{"agent":{"agent_status":"working"}}}'
     ;;
   *)
