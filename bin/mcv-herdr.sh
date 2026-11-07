@@ -66,7 +66,9 @@
 #       worktree has uncommitted or untracked files, or git cannot read it;
 #       ignored files are deleted with it. The branch is kept, as a local
 #       branch; push it first if you need it. The workspace herdr opened for
-#       the repository's main checkout stays open; close it in herdr.
+#       the repository's main checkout stays open; close it in herdr. Folders
+#       left empty (the project's state, herdr's folder for the repository)
+#       are removed.
 #       Also works after the user has closed the worker's herdr workspace.
 #
 # <project> and <id>: lowercase letters, digits, - and _; <project> starts with
@@ -796,6 +798,12 @@ cmd_remove() {
     fi
   fi
   rm -rf "$dir"
+  # Folders this task's creation left that are now empty: the project's
+  # state folder after its last task, and herdr's per-repository worktree
+  # folder after its last worktree. rmdir removes only an empty folder, so
+  # one still in use (another task, a running watcher's lock) stays.
+  rmdir "$(dirname "$dir")" "$(dirname "$(dirname "$dir")")" 2>/dev/null || true
+  rmdir "$(dirname "$wt")" 2>/dev/null || true
   jq -cn --arg b "$branch" '{removed: true, branch_kept: $b}'
 }
 

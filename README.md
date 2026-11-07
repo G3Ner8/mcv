@@ -270,6 +270,18 @@ to push without being told, workers will not push.
   Claude process. mcv's hooks act only when `MCV_TASK` names a task mcv started, so installing mcv
   does not change your other Claude Code sessions.
 
+## What mcv writes
+
+- **In your project:** only `.claude/mcv.json`, once you agree to it. If that folder is a git
+  repository where the file is not ignored, the coordinator offers to ignore it for you on this
+  machine (`.git/info/exclude`), without touching the project's `.gitignore`.
+- **In each repository's git:** a branch per worker, which `remove` keeps; and `origin/HEAD`, which
+  `spawn` sets from the remote (`git remote set-head --auto`, as `git clone` does).
+- **Elsewhere on your machine:** task state in `~/.claude/mcv/`, worktrees in `~/.herdr/worktrees/`.
+  `remove` deletes both, and the folders it leaves empty.
+- **Left behind, not mcv's to delete:** the herdr workspace opened for a repository's main
+  checkout, and each worker's Claude session log in `~/.claude/projects/`.
+
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md): the parts, the state they keep, the rules they

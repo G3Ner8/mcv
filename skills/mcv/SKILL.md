@@ -8,7 +8,7 @@ metadata:
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
-  scope: writes files — git worktrees and branches (through herdr), task state under ~/.claude/mcv/<project>/, and .claude/mcv.json on first use; starts Claude Code sessions
+  scope: writes files — git worktrees and branches (through herdr), task state under ~/.claude/mcv/<project>/, and .claude/mcv.json on first use (plus a line in .git/info/exclude if the user agrees); starts Claude Code sessions
 ---
 
 # mcv — the coordinator
@@ -89,7 +89,12 @@ Skip this skill for:
      machine, and their test runs compete.
 
    Show the whole file, write it only after the user agrees, and mention it is personal until they
-   choose to commit it. If a repo has files the workers need that git ignores (a test account's
+   choose to commit it. Then, if this folder is a git repository and `git check-ignore -q
+   .claude/mcv.json` fails (the file is not ignored), say so in one line and offer, recommending
+   the first: add `.claude/mcv.json` to `.git/info/exclude` (this repository, this machine only,
+   no change to the team's files); add `**/.claude/mcv.json` to their global git ignore file (every
+   project on this machine); or leave it for them to commit. Never edit the project's
+   `.gitignore` for this. If a repo has files the workers need that git ignores (a test account's
    `.env`, say), tell the user they can list them in a `.worktreeinclude` file at that repo's root
    (`.gitignore` syntax); `spawn` copies them into each worktree.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
