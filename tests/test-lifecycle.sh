@@ -77,10 +77,23 @@ expect "read reads the worker's pane, agent or not" \
 # A worker that failed to start and was then let through takes a prompt,
 # which clears its marker.
 echo "acme-t2" >>"$FAKE_DIR/agents"
+MCV_TASK=acme/t2 "$(dirname "$H")/mcv-status" --contract >/dev/null
 out="$("$H" prompt acme/t2 "hello" --no-wait 2>&1)"; rc=$?
 expect "prompt to a worker let through after a failed start succeeds" \
   '[[ $rc -eq 0 && "$out" == *working* ]]' "rc=$rc $out"
 expect "that prompt clears the starting marker" '[[ ! -e "$MCV_HOME/acme/tasks/t2/starting" ]]'
+
+# A worker whose Claude did not load mcv's hooks (the plugin is not installed
+# for it) has none of the worker rules: prompt refuses to give it work.
+out="$("$H" spawn acme t3 "$repo" fix/t3 2>&1)"; rc=$?
+expect "a worker with mcv's hooks has the rules-loaded marker" \
+  '[[ $rc -eq 0 && -f "$MCV_HOME/acme/tasks/t3/rules-loaded" ]]' "rc=$rc $out"
+out="$(FAKE_NOHOOKS=1 "$H" spawn acme t4 "$repo" fix/t4 2>&1)"; rc=$?
+expect "spawn of a worker without hooks still succeeds" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+out="$("$H" prompt acme/t4 "hello" --no-wait 2>&1)"; rc=$?
+expect "prompt refuses a worker that never got mcv's rules" \
+  '[[ $rc -eq 1 && "$out" == *"without the mcv worker rules"* && $(printf "%s\n" "$out" | wc -l) -eq 1 ]]' "rc=$rc $out"
+expect "that refused prompt sent nothing" '! grep -q "^agent prompt acme-t4" "$FAKE_DIR/calls"'
 
 # remove after the user closed the worker's workspace: git removes the
 # worktree, the task goes, the branch stays.

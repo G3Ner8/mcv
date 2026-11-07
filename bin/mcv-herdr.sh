@@ -38,7 +38,9 @@
 #   prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]
 #       Send text and wait until the worker stops (default 10 minutes). Prints
 #       only the worker's new state; use `read` to see what it said. Refused
-#       unless the worker is idle or done. With --no-wait, return as soon as
+#       unless the worker is idle or done, and for a worker whose Claude did
+#       not load mcv's hooks (no rules-loaded marker from its SessionStart
+#       hook: the plugin is not loaded there). With --no-wait, return as soon as
 #       the worker has started (state working, or blocked at a dialog), within
 #       seconds. Without it, when run from Claude Code's Bash tool, give the
 #       tool a timeout longer than --timeout. Says so plainly when Claude has
@@ -611,6 +613,11 @@ cmd_prompt() {
   [[ -n "$status" ]] || die "herdr agent get gave unexpected output"
   [[ "$status" == idle || "$status" == "done" ]] \
     || die "worker $task is $status; prompt is only sent to a worker that has stopped (idle or done)"
+  # mcv's SessionStart hook leaves this marker. Without it the worker's
+  # Claude did not load the mcv plugin, so it has no git rules, may use
+  # AskUserQuestion and never writes the status log: give it no work.
+  [[ -f "$d/rules-loaded" ]] \
+    || die "worker $task started without the mcv worker rules: the mcv plugin is not loaded in its Claude session (install it for your user, or spawn with -- --plugin-dir <mcv folder>); remove it and spawn again"
 
   # Return as soon as the worker has started (or stopped at a dialog); herdr
   # fails the call if neither happens within 15 seconds.

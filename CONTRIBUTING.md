@@ -17,7 +17,7 @@ claude --plugin-dir /path/to/mcv
 ```
 
 and pass the same flag to the workers you start by hand: `bin/mcv-herdr.sh spawn ... -- --plugin-dir
-/path/to/mcv`. Without it, a worker has no mcv hooks.
+/path/to/mcv`. Without it, a worker has no mcv hooks, and `prompt` refuses it.
 
 ## Layout
 

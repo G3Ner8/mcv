@@ -87,8 +87,24 @@ expect "answering q1 twice exits 1" '[[ $rc -eq 1 ]]' "rc=$rc"
 env -u MCV_TASK "$S" --task shop/t1 answered q9 "nope" >/dev/null 2>&1; rc=$?
 expect "answering an unasked question exits 1" '[[ $rc -eq 1 ]]' "rc=$rc"
 
+# An answer the coordinator could not send yet (the worker was busy) is kept
+# as pending, so the watcher can hand it back when the worker stops.
+"$S" --task shop/t1 pending q2 "keep it" >/dev/null 2>&1; rc=$?
+expect "a worker cannot record a pending answer" '[[ $rc -eq 1 ]]' "rc=$rc"
+env -u MCV_TASK "$S" --task shop/t1 pending q2 "keep the old route"; rc=$?
+expect "pending q2 succeeds" '[[ $rc -eq 0 ]]' "rc=$rc"
+expect "pending line recorded with its text" \
+  '[[ "$(tail -1 "$log" | cut -f2-4)" == "pending"$'"'"'\t'"'"'"q2"$'"'"'\t'"'"'"keep the old route" ]]' "$(tail -1 "$log")"
+env -u MCV_TASK "$S" --task shop/t1 pending q1 "late" >/dev/null 2>&1; rc=$?
+expect "pending for an answered question exits 1" '[[ $rc -eq 1 ]]' "rc=$rc"
+env -u MCV_TASK "$S" --task shop/t1 pending q9 "nope" >/dev/null 2>&1; rc=$?
+expect "pending for an unasked question exits 1" '[[ $rc -eq 1 ]]' "rc=$rc"
+env -u MCV_TASK "$S" --task shop/t1 answered q2 "keep the old route"; rc=$?
+expect "a pending question can still be answered" '[[ $rc -eq 0 ]]' "rc=$rc"
+
 # Hook outputs with MCV_TASK set.
 c="$("$S" --contract)"
+expect "--contract marks that the worker got its rules" '[[ -f "$home/shop/tasks/t1/rules-loaded" ]]'
 expect "--contract is JSON" 'jq -e . <<<"$c" >/dev/null'
 expect "--contract is a SessionStart context" \
   '[[ "$(jq -r .hookSpecificOutput.hookEventName <<<"$c")" == SessionStart ]]'

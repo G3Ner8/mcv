@@ -54,11 +54,14 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
 
    A failure, or INT/TERM/HUP, before step 7 undoes the worktree, branch and task. From step 7 on
    the task stays, for `remove`.
-3. **Work.** The worker's SessionStart hook prints its rules. It reports through `mcv-status`; a
-   `needs-decision` prints a question id and the worker ends its turn.
+3. **Work.** The worker's SessionStart hook prints its rules and leaves `rules-loaded` in the task
+   folder; `prompt` refuses a worker without it, whose Claude did not load the plugin. The worker
+   reports through `mcv-status`; a `needs-decision` prints a question id and the worker ends its
+   turn.
 4. **Watch.** `mcv-watch` prints the event; the coordinator relays the question to the user as
    `<id> #<n>`, reads the worker's screen, sends the answer with `prompt --no-wait`, and records it
-   with `mcv-status --task ... answered`.
+   with `mcv-status --task ... answered`. If the worker is still busy, the coordinator records the
+   answer as `pending` instead, and the watcher prints it back as `deliver` when the worker stops.
 5. **Remove** (`mcv-herdr.sh remove`), when the user agrees: refuse a dirty worktree, remove it
    through herdr (or git, if the workspace is already gone), delete the task state. The branch stays.
 
@@ -73,6 +76,7 @@ $MCV_HOME/
   <project>/tasks/<id>/
     meta                              JSON, written whole and renamed into place
     starting                          present until Claude has started
+    rules-loaded                      left by the worker's SessionStart hook
     status.log                        one event per line
     status.log.lock/pid               held during one write to the log
 ```
@@ -81,15 +85,18 @@ $MCV_HOME/
 `context` (empty when none), `copied` (number of files from `.worktreeinclude`), `created` (UTC).
 
 **status.log** line: `<UTC time>\t<kind>\t<question id or ->\t<text>`, with kind one of
-`needs-decision`, `blocked`, `done`, `failed`, `note`, `answered`. Text has tabs, newlines and other
-control characters removed. Question ids are `q1`, `q2`, ... per task.
+`needs-decision`, `blocked`, `done`, `failed`, `note` (the worker's), `pending`, `answered` (the
+coordinator's). Text has tabs, newlines and other control characters removed. Question ids are
+`q1`, `q2`, ... per task. A question is open until it has an `answered` line; a `pending` line holds
+an answer the coordinator could not send yet.
 
 **Locks** are folders created with `mkdir` (atomic) holding `<pid> <epoch seconds>`. A lock whose
 pid has exited without releasing it is taken over, but only when it is unchanged since read and at
 least 2 seconds old, so a lock another process has just taken is never deleted.
 
 **Watcher state** (in `$MCV_WATCH_STATE`, a temporary folder by default), one line per task in
-`<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last kind> <gone>`.
+`<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last kind> <gone>
+<owe>`, where owe marks a pending answer read while herdr was down.
 The pane identifies the worker: a task removed and spawned again gets a new pane and a fresh start.
 
 ## Watcher events
@@ -97,14 +104,17 @@ The pane identifies the worker: a task removed and spawned again gets a new pane
 Tab-separated, one per line:
 
 ```
-<time>  <project>/<id>  <kind>  <qid|->  <text>   a new status-log line (not answered lines)
-<time>  <project>/<id>  state   blocked           the worker stopped at a dialog
-<time>  <project>/<id>  state   done              a turn ended with no report line since the last event
-<time>  <project>/<id>  gone    -                 the worker no longer runs Claude
+<time>  <project>/<id>  <kind>   <qid|->  <text>   a new worker line in the status log
+<time>  <project>/<id>  deliver  <qid>    <text>   a pending answer, now that the worker has stopped
+<time>  <project>/<id>  state    blocked           the worker stopped at a dialog
+<time>  <project>/<id>  state    done              a turn ended with no report line since the last event
+<time>  <project>/<id>  gone     -                 the worker no longer runs Claude
 ```
 
-On its first poll the watcher prints the questions still without an answer, and nothing else from
-the past.
+`deliver` goes out when the worker stops (reaches done or idle from another state, or ends another
+turn) while an answer is pending, or at once when the answer is recorded after it stopped; it
+replaces the `state done` of that stop. On its first poll the watcher prints the questions still
+without an answered or pending line, the deliveries owed, and nothing else from the past.
 
 ## Invariants
 
@@ -113,6 +123,8 @@ the past.
 - A worker's branch is new, exists nowhere else in any letter case, is never a shared branch, and
   has no upstream.
 - Hooks do nothing outside a worker.
+- No work is sent to a worker that did not get its rules: `prompt` needs `rules-loaded`.
+- An answer the user gave is never lost to a busy worker: it waits as `pending` until delivered.
 - Only the coordinator records answers; a worker cannot close its own question.
 - Errors are one line; no command leaves a half-made task that `remove` cannot clean up, except
   SIGKILL in the moment between herdr creating a worktree and meta being written.

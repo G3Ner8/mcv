@@ -137,6 +137,10 @@ Run `H` with no arguments for every command and option.
   Files your `.gitignore` ignores (build output, dependencies, a local `.env`) are deleted with the
   worktree. The branch stays as a local branch; push it first if you need it elsewhere. It also works after you have closed the worker's
   herdr workspace yourself.
+- `prompt` refuses a worker whose Claude did not load the mcv plugin, since such a worker has none
+  of mcv's rules (below) and never reports its questions. This happens when mcv is installed for
+  one project only, or when you run the helper from a clone: pass `-- --plugin-dir <that clone>`
+  to `spawn`. `remove` the worker and spawn it again.
 - `read` shows the worker's screen even after Claude has exited there; `prompt` then says the worker
   is no longer running Claude.
 - Task state is kept outside every repository, in `~/.claude/mcv/<project>/tasks/<id>/`; set

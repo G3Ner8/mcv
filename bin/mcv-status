@@ -11,10 +11,15 @@
 #
 # The coordinator records an answer, which closes the question:
 #   mcv-status --task <project>/<id> answered <question-id> <text>
-# (refused when MCV_TASK is set: a worker never closes its own questions)
+# or, when the worker was still busy and the answer could not be sent yet,
+# keeps it for later; mcv-watch prints it as a deliver event once the worker
+# stops, and the question stays open until answered:
+#   mcv-status --task <project>/<id> pending <question-id> <text>
+# (both refused when MCV_TASK is set: a worker never closes its own questions)
 #
 # mcv's hooks call:
-#   mcv-status --contract              SessionStart: the rules a worker follows
+#   mcv-status --contract              SessionStart: the rules a worker follows;
+#                                      also leaves <task>/rules-loaded
 #   mcv-status --deny-ask              PreToolUse on AskUserQuestion: refuse it
 # Both print nothing and exit 0 unless MCV_TASK names a task that exists.
 #
@@ -147,6 +152,9 @@ case "${1:-}" in
   # Anything else (unset, malformed, a task already removed) is not a worker.
   --contract)
     is_task "${MCV_TASK:-}" || exit 0
+    # Proof that this worker's Claude loaded mcv's hooks: prompt refuses a
+    # worker without it, since that worker has none of the rules below.
+    : >"$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}/rules-loaded" 2>/dev/null || true
     jq -cn --arg ctx "$(contract_text)" \
       '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
     ;;
@@ -159,7 +167,8 @@ case "${1:-}" in
     ;;
 
   --task)
-    [[ $# -eq 5 && "$3" == answered ]] || usage "usage: --task <project>/<id> answered <question-id> <text>"
+    [[ $# -eq 5 && ( "$3" == answered || "$3" == pending ) ]] \
+      || usage "usage: --task <project>/<id> answered|pending <question-id> <text>"
     # Only the coordinator records answers; a worker closing its own question
     # would hide it from the user.
     [[ -z "${MCV_TASK:-}" ]] || die "a worker cannot record answers; only the coordinator does"
@@ -172,7 +181,7 @@ case "${1:-}" in
     fi
     ! cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
       || die "question $qid in task $2 is already answered"
-    append "$log" answered "$qid" "$5"
+    append "$log" "$3" "$qid" "$5"
     ;;
 
   needs-decision|blocked|done|failed|note)

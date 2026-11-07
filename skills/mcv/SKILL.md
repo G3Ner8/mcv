@@ -121,7 +121,9 @@ Skip this skill for:
 6. **Send the task.** `BIN/mcv-herdr.sh prompt <project>/<id> "<dispatch, with {task} replaced>"
    --no-wait`. It returns within seconds with the state `working` (or `blocked` if the worker hit a
    dialog at once). Never call `prompt` without `--no-wait`: Claude Code's Bash tool stops waiting
-   after 2 minutes.
+   after 2 minutes. If it refuses because the worker started without the mcv worker rules, the mcv
+   plugin is not loaded in that worker: tell the user, offer `remove`, and start no more workers
+   until it is fixed; every worker would have the same problem.
 7. Tell the user the workers are running, and carry on with the conversation. The watcher wakes you.
 
 The worker's own rules (how to ask, git rules, staying in its worktree) reach it through mcv's
@@ -131,7 +133,8 @@ hooks. Do not repeat them in the task text.
 
 Each line from the watcher is one event, tab-separated: time, `<project>/<id>`, then the event.
 When the watcher starts (a new session, or after it was restarted) it first shows every question
-still without an answered line, so nothing asked earlier is lost. A question whose `<id> #<n>` you
+still without an answered or pending line, so nothing asked earlier is lost; an answer still
+pending comes as `deliver` once the worker has stopped. A question whose `<id> #<n>` you
 already relayed in this conversation is the same question: do not ask the user twice.
 
 | Event | What to do |
@@ -143,6 +146,7 @@ already relayed in this conversation is the same question: do not ask the user t
 | `done - <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
 | `failed - <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
 | `note - <text>` | Mention it in one line. |
+| `deliver qN <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 4 below). Send it as in step 2 of "Sending an answer", with this exact answer; do not ask the user again. |
 | `gone -` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. Start the next waiting worker, if any. |
 
 If `prompt` says a worker is not running Claude any more, handle it like `gone -`: `read` its screen
@@ -170,7 +174,11 @@ you know.
 3. If the worker has moved on (the user answered in its pane), send nothing and record
    `BIN/mcv-status --task <project>/<id> answered q<n> "answered by the user in the worker's pane"`.
 4. If `prompt` refuses because the worker is busy, it did not end its turn after asking. Do not
-   retry in a loop; wait for its next event.
+   retry in a loop, and do not just wait: no event would come, since the question already woke
+   you. Keep the answer: `BIN/mcv-status --task <project>/<id> pending q<n> "<answer>"`. The
+   watcher prints `deliver q<n> <answer>` as soon as the worker stops (at once if it already
+   has); then send it and record `answered`. Tell the user the answer goes in when the worker
+   stops.
 
 ### When the user asks where things stand
 
