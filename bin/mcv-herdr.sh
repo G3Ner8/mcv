@@ -27,7 +27,9 @@
 #       first. herdr chooses the folder, under ~/.herdr/worktrees/. Then start
 #       an idle Claude in it with MCV_TASK=<project>/<id> set. Send it work with `prompt`. Arguments after
 #       `--` go to claude, e.g. -- --permission-mode default; mcv's own
-#       --base and --context there are refused. If Claude fails to
+#       --base and --context there are refused, and so are Claude's
+#       --add-dir (it would let the worker edit that folder) and --settings
+#       (it could override MCV_TASK), as --flag value or --flag=value. If Claude fails to
 #       start (for example at the folder trust dialog), the task is left in
 #       place: once the user lets Claude through in its pane, `prompt` works;
 #       otherwise run `remove` before reusing the id. <project>-<id> must not
@@ -433,6 +435,10 @@ cmd_spawn() {
   for a in "$@"; do
     case "$a" in
       --base|--base=*|--context|--context=*) die "$a after --: mcv's options go before --, Claude's after" ;;
+      # --add-dir would open a folder the context's deny rule does not
+      # cover, and --settings could override MCV_TASK.
+      --add-dir|--add-dir=*) die "$a after --: spawn refuses it, since the worker could edit that folder; use --context for a read-only folder" ;;
+      --settings|--settings=*) die "$a after --: spawn refuses it, since it could override the MCV_TASK that ties the worker to its task" ;;
     esac
   done
   # The context is the folder around the repository. One inside it, or the

@@ -130,6 +130,16 @@ expect "a question of only escape sequences refused" '[[ $rc -eq 2 ]]' "rc=$rc"
 "$S" note $'\e[31mred\e[0m plain \e]0;title\a end' >/dev/null
 expect "escape sequences removed whole" '[[ "$(tail -1 "$log" | cut -f4)" == "red plain  end" ]]' "$(tail -1 "$log" | cut -f4 | od -c | head -3)"
 
+# CSI with a private-parameter prefix (> or ?) and a charset designation such
+# as ESC ( B leave nothing behind either.
+"$S" note $'a\e[>4;1mb\e[?25lc\e(Bd\e)0e\e7f' >/dev/null
+expect "private CSI and charset designations removed whole" '[[ "$(tail -1 "$log" | cut -f4)" == "abcdef" ]]' "$(tail -1 "$log" | cut -f4 | od -c | head -3)"
+
+# The C1 CSI introducer U+009B (UTF-8 C2 9B) starts a sequence too. Thai
+# U+0E1B ends in the byte 9B and must survive.
+"$S" note $'\xe0\xb8\x9bx\xc2\x9b31my\xc2\x9b?25hz\xc2\x9b' >/dev/null
+expect "C1 CSI sequences removed whole" '[[ "$(tail -1 "$log" | cut -f4)" == $'"'"'\xe0\xb8\x9bxyz'"'"' ]]' "$(tail -1 "$log" | cut -f4 | od -c | head -3)"
+
 # Hook outputs with MCV_TASK set.
 c="$("$S" --contract)"
 expect "--contract marks that the worker got its rules" '[[ -f "$home/shop/tasks/t1/rules-loaded" ]]'

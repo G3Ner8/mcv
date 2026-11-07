@@ -376,5 +376,42 @@ expect "a lock left by a dead watcher is taken over" 'kill -0 "$wpid" 2>/dev/nul
 kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
 expect "a stopped watcher releases its lock" '[[ ! -e "$MCV_HOME/acme/watch.lock" ]]'
 
+# Several watchers that find the same stale lock at the same moment: exactly
+# one takes it over and the rest refuse. Each round starts four at once; the
+# race is a matter of timing, so a few rounds make a miss unlikely.
+race_ok=1
+race_why=""
+for round in 1 2 3 4 5; do
+  mkdir -p "$MCV_HOME/acme/watch.lock"; echo "$dead" >"$MCV_HOME/acme/watch.lock/pid"
+  pids=()
+  for n in 1 2 3 4; do
+    MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >"$root/race$n.out" 2>&1 &
+    pids+=("$!")
+  done
+  sleep 3
+  alive=0
+  for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && alive=$((alive + 1)); done
+  refused=0
+  for n in 1 2 3 4; do grep -q "already running" "$root/race$n.out" && refused=$((refused + 1)); done
+  kill -TERM "${pids[@]}" 2>/dev/null; wait "${pids[@]}" 2>/dev/null
+  if [[ $alive -ne 1 || $refused -ne 3 ]]; then
+    race_ok=0; race_why="round $round: $alive running, $refused refused: $(cat "$root"/race*.out)"; break
+  fi
+done
+expect "of four watchers racing for a stale lock, one runs and three refuse" '[[ $race_ok -eq 1 ]]' "$race_why"
+expect "the racing watchers leave no lock behind" '[[ ! -e "$MCV_HOME/acme/watch.lock" ]]' \
+  "$(ls -la "$MCV_HOME/acme" 2>&1)"
+
+# A takeover lock left by a watcher killed mid-takeover does not block the
+# next one for good.
+mkdir -p "$MCV_HOME/acme/watch.lock" "$MCV_HOME/acme/watch.lock.takeover"
+echo "$dead" >"$MCV_HOME/acme/watch.lock/pid"
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
+wpid=$!
+sleep 7
+expect "a leftover takeover lock is cleared and the stale lock taken over" \
+  'kill -0 "$wpid" 2>/dev/null && [[ "$(cat "$MCV_HOME/acme/watch.lock/pid")" == "$wpid" ]]'
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

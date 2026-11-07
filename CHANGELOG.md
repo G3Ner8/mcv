@@ -4,6 +4,19 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-11-07
+
+The first release whose changes were made by mcv workers, in a smoke test on this repository.
+
+### Fixed
+
+- `mcv-status` removes the escape sequences 0.1.1 left fragments of: CSI with a private prefix
+  (`ESC [ > 4 ; 1 m`), charset designations (`ESC ( B`) and the C1 introducer U+009B.
+- `spawn` refuses `--add-dir` and `--settings` after `--`, in either form: the first would open a
+  folder the context's deny rule does not cover, the second could override `MCV_TASK`.
+- Several watchers starting together on a stale `watch.lock` could all run; taking it over now
+  goes through a second lock, `watch.lock.takeover`, so exactly one does.
+
 ## [0.1.1] - 2026-11-07
 
 ### Added

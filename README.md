@@ -243,6 +243,12 @@ H spawn brewly cart-fix ~/code/brewly/web fix/cart-total -- --permission-mode de
 In 0.1.0 such a worker stops in the `blocked` state at each approval dialog, and the helper cannot
 answer it: switch to the worker's herdr pane and approve or deny there.
 
+`spawn` refuses two of Claude's flags after `--`, in both the `--flag value` and `--flag=value`
+forms: `--add-dir`, which would let the worker edit a folder outside the deny rule that keeps a
+context read-only (use `context` for a folder the worker should read), and `--settings`, which
+could override the `MCV_TASK` that ties the worker to its task. mcv's own `--base` and `--context`
+go before `--` and are refused after it.
+
 ## Git rules for workers
 
 Every worker is told two sets of git rules when it starts.
