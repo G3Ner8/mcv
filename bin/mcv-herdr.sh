@@ -175,6 +175,45 @@ task_dir() {
 # die() inside a command substitution only leaves the subshell, so every
 # caller of task_dir assigns first and exits on failure before using it.
 
+# Take over stale lock folder $1, whose pid file read $2 ("" for a lock with
+# no pid) when it was found stale, and succeed when this process now holds
+# it, its pid written. Two processes that both found it stale could
+# otherwise each delete it: the first deletes it and makes its own, the
+# second, which checked before that, deletes the first one's new lock, and
+# both go ahead (measured: overlapping worktree creations in 2 of 5 rounds
+# of 8 spawns on a stale repository lock). So this holds <lock>.takeover
+# while it checks the lock again, deletes it and makes its own, and writes
+# its pid before letting go, so the next one in sees a live holder. A lock
+# with no pid must still be a minute old, or it is one just made. A
+# takeover lock left by a process killed mid-takeover is cleared when its
+# pid has exited and it is at least 2 seconds old, or it has no pid and is
+# a minute old.
+takeover() {
+  local l="$1" seen="$2" t="$1.takeover" tseen tpid tat ok=1
+  if ! mkdir "$t" 2>/dev/null; then
+    tseen="$(cat "$t/pid" 2>/dev/null || true)"
+    read -r tpid tat <<<"$tseen" || true
+    if [[ "$tpid" =~ ^[0-9]+$ && "$tat" =~ ^[0-9]+$ ]] && (( $(date +%s) - tat >= 2 )) \
+      && ! kill -0 "$tpid" 2>/dev/null; then
+      rm -rf "$t"
+    elif [[ -z "$tseen" && -n "$(find "$t" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+      rm -rf "$t"
+    fi
+    return 1
+  fi
+  printf '%s %s\n' "$$" "$(date +%s)" >"$t/pid"
+  if [[ "$(cat "$l/pid" 2>/dev/null || true)" == "$seen" ]] \
+    && { [[ -n "$seen" ]] || [[ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; }; then
+    rm -rf "$l"
+    if mkdir "$l" 2>/dev/null; then
+      printf '%s %s\n' "$$" "$(date +%s)" >"$l/pid"
+      ok=0
+    fi
+  fi
+  rm -rf "$t"
+  return "$ok"
+}
+
 # Take lock folder $1, waiting up to $2 seconds (0: do not wait); fail when
 # it is still held. The lock holds "<pid> <epoch seconds>". A lock whose pid
 # has exited without releasing it (a crash) is taken over, but only if it is
@@ -182,6 +221,8 @@ task_dir() {
 # process has just taken is never deleted. A lock with no pid at all was
 # left by a process killed between making it and writing the pid; it is
 # taken over once the folder is a minute old, far longer than that gap.
+# Taking over goes through takeover, so two processes that both found the
+# lock stale never both hold it.
 take_lock() {
   local l="$1" seen pid at i=0
   mkdir -p "$(dirname "$l")"
@@ -191,13 +232,10 @@ take_lock() {
     if [[ "$pid" =~ ^[0-9]+$ && "$at" =~ ^[0-9]+$ ]] && (( $(date +%s) - at >= 2 )) \
       && ! kill -0 "$pid" 2>/dev/null \
       && [[ "$(cat "$l/pid" 2>/dev/null || true)" == "$seen" ]]; then
-      rm -rf "$l"
-      continue
-    fi
-    if [[ -z "$seen" && -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ]] \
+      takeover "$l" "$seen" && break
+    elif [[ -z "$seen" && -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ]] \
       && [[ ! -s "$l/pid" ]]; then
-      rm -rf "$l"
-      continue
+      takeover "$l" "" && break
     fi
     (( i++ < $2 )) || return 1
     sleep 1

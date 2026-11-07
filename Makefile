@@ -11,7 +11,8 @@ BASE ?= origin/main
 # Everything a change must pass before it is committed.
 check: lint json version-check test
 
-# The whole suite, against a fake herdr. Takes about a minute.
+# The whole suite, against a fake herdr. Takes two to three minutes, most of it
+# the lock-contention rounds in test-spawn.sh and test-status.sh.
 test:
 	@tests/run.sh
 

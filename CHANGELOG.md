@@ -4,6 +4,20 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-11-07
+
+### Fixed
+
+- Two processes that found the same stale lock could both take it: `mcv-status`'s log lock
+  (repeated question ids, lost questions) and `mcv-herdr.sh`'s claim and repository locks
+  (overlapping spawns). Taking over now goes through `<lock>.takeover`, as the watch lock's
+  already did. This is the likely cause of the repeated question ids seen once on CI.
+
+### Changed
+
+- README and architecture say that herdr's sidebar lists workers under the workspace it takes as
+  the repository's main checkout, which mcv cannot choose.
+
 ## [0.1.2] - 2026-11-07
 
 The first release whose changes were made by mcv workers, in a smoke test on this repository.
