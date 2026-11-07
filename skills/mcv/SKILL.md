@@ -141,7 +141,8 @@ Skip this skill for:
    `--base <base>` when that repo's settings have one and `--context <absolute path of context>`
    when they have one, except for a repo that is the context folder itself (the project root listed
    among `repos`): it already has that folder's notes, and `spawn` refuses a context inside the
-   repository. It
+   repository. Claude's own flags go after `--`; `spawn` refuses `--add-dir` and `--settings`
+   there (either form), and `--base`/`--context` too. It
    prints the task, worktree, branch, base, context and how many files it copied from
    `.worktreeinclude`. If it fails, tell the user its one-line reason. If Claude failed to start, `BIN/mcv-herdr.sh read
    <project>/<id>` shows the screen: describe it. Usually it is Claude's folder trust dialog, whose

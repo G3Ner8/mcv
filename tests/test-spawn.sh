@@ -164,6 +164,17 @@ for o in --base --context; do
   expect "$o after -- refused" '[[ $rc -eq 1 && "$out" == *"before --"* ]] && one_line' "rc=$rc $out"
 done
 
+# --add-dir would open a folder past the context's deny rule, and --settings
+# could override MCV_TASK, so neither may reach Claude, in either form.
+for o in --add-dir --settings; do
+  out="$(spawn n5 "$repo" fix/n5 -- "$o" x 2>&1)"; rc=$?
+  expect "$o after -- refused" '[[ $rc -eq 1 && "$out" == *"$o"* && "$out" != *"before --"* ]] && one_line' "rc=$rc $out"
+  out="$(spawn n5 "$repo" fix/n5 -- "$o=x" 2>&1)"; rc=$?
+  expect "$o=x after -- refused" '[[ $rc -eq 1 && "$out" == *"$o"* && "$out" != *"before --"* ]] && one_line' "rc=$rc $out"
+done
+out="$(spawn n5 "$repo" fix/n5 -- --permission-mode default --add-dir /tmp 2>&1)"; rc=$?
+expect "--add-dir later in the claude args refused" '[[ $rc -eq 1 && "$out" == *"--add-dir"* ]] && one_line' "rc=$rc $out"
+
 # A bare repository has no checkout to make worktrees from.
 out="$(spawn n6 "$root/origin.git" fix/n6 2>&1)"; rc=$?
 expect "a bare repository is refused as bare" '[[ $rc -eq 1 && "$out" == *bare* ]] && one_line' "rc=$rc $out"

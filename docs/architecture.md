@@ -51,7 +51,9 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
       the count.
    7. `herdr agent start` with `--add-dir <context>` (if any) and `--settings` carrying `MCV_TASK`,
       `MCV_HOME`, and for a context `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` and a deny rule
-      for edits there. Remove `starting`.
+      for edits there. Remove `starting`. Claude arguments after `--` follow; spawn refused
+      `--add-dir` and `--settings` among them (and `--base`/`--context`) before step 1, since
+      either would undo the deny rule or `MCV_TASK`.
 
    A failure, or INT/TERM/HUP, before step 7 undoes the worktree, branch and task. From step 7 on
    the task stays, for `remove`.
