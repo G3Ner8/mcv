@@ -110,6 +110,22 @@ env -u MCV_TASK "$S" --task shop/t1 answered "$q" per drink >/dev/null; rc=$?
 expect "unquoted answer text is kept whole" \
   '[[ $rc -eq 0 && "$(tail -1 "$log" | cut -f2-4)" == "answered"$'"'"'\t'"'"'"$q"$'"'"'\t'"'"'"per drink" ]]' "rc=$rc $(tail -1 "$log")"
 
+# Empty text says nothing: refused as a usage error, nothing written.
+n_before=$(wc -l <"$log")
+for t in "" "   "; do
+  "$S" "done" "$t" >/dev/null 2>&1; rc=$?
+  expect "report with text '$t' refused" '[[ $rc -eq 2 ]]' "rc=$rc"
+done
+q="$("$S" needs-decision "Oat or soy?")"
+env -u MCV_TASK "$S" --task shop/t1 answered "$q" "" >/dev/null 2>&1; rc=$?
+expect "an empty answer refused" '[[ $rc -eq 2 ]]' "rc=$rc"
+expect "only the question was written" '[[ $(wc -l <"$log") -eq $((n_before + 1)) ]]' "$(tail -2 "$log")"
+env -u MCV_TASK "$S" --task shop/t1 answered "$q" "oat" >/dev/null
+
+# Terminal escape sequences are removed whole, not left as "[31m".
+"$S" note $'\e[31mred\e[0m plain \e]0;title\a end' >/dev/null
+expect "escape sequences removed whole" '[[ "$(tail -1 "$log" | cut -f4)" == "red plain  end" ]]' "$(tail -1 "$log" | cut -f4 | od -c | head -3)"
+
 # Hook outputs with MCV_TASK set.
 c="$("$S" --contract)"
 expect "--contract marks that the worker got its rules" '[[ -f "$home/shop/tasks/t1/rules-loaded" ]]'
@@ -214,7 +230,7 @@ expect "and it can be answered" '[[ $rc -eq 0 ]]' "rc=$rc"
 # Control characters other than tab and newline never reach the log.
 MCV_TASK=shop/t3 "$S" note "$(printf 'a\033[31mred\033[0m\007b')" >/dev/null
 last="$(tail -1 "$log3")"
-expect "escape and bell characters are removed" '[[ "$last" == *$'"'"'\t'"'"'"a[31mred[0mb" ]]' "$(printf '%q' "$last")"
+expect "escape and bell characters are removed" '[[ "$last" == *$'"'"'\t'"'"'"aredb" ]]' "$(printf '%q' "$last")"
 MCV_TASK=shop/t3 "$S" note "สวัสดี ✓" >/dev/null
 expect "Thai and other UTF-8 text is kept" '[[ "$(tail -1 "$log3")" == *"สวัสดี ✓" ]]'
 

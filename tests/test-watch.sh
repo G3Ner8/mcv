@@ -315,6 +315,13 @@ out="$(bpoll 2>/dev/null)"
 expect "new watcher: a stopped worker's pending answer is delivered" '[[ "$out" == *"brew/l${TAB}deliver${TAB}q1${TAB}medium" ]]' "$out"
 expect "new watcher: its question is not shown again" '[[ "$out" != *"Which cup size?"* ]]' "$out"
 
+# A project with no tasks folder (a misspelt name, or nothing spawned yet)
+# is said once on stderr, so a silent watcher is not mistaken for a quiet one.
+out="$(MCV_WATCH_STATE="$root/state5" "$W" nosuch --once 2>&1 >/dev/null)"; rc=$?
+expect "a project with no tasks is named on stderr" '[[ $rc -eq 0 && "$out" == *"no tasks"*"nosuch"* ]]' "rc=$rc $out"
+out="$(MCV_WATCH_STATE="$root/state5" "$W" nosuch --once 2>&1 >/dev/null)"
+expect "and only once" '[[ -z "$out" ]]' "$out"
+
 # The long-running watcher stops at once on TERM, not after its interval.
 MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
 wpid=$!

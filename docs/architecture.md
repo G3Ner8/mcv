@@ -129,7 +129,8 @@ without an answered or pending line, the deliveries owed, and nothing else from 
 - Hooks do nothing outside a worker.
 - No work is sent to a worker that did not get its rules: `prompt` needs `rules-loaded`.
 - An answer the user gave is never lost to a busy worker: it waits as `pending` until delivered.
-- Only the coordinator records answers; a worker cannot close its own question.
+- A worker is refused when it records an answer (`mcv-status --task` with `MCV_TASK` set), and its
+  rules forbid it; see Known limits for what that does not stop.
 - Errors are one line; no command leaves a half-made task that `remove` cannot clean up, except
   SIGKILL in the moment between herdr creating a worktree and meta being written.
 
@@ -154,6 +155,13 @@ with every herdr window closed.
 
 - `spawn --context` denies Claude's file-editing tools in the context folder; a shell command
   could still write there, as in any session.
+- Task state is not a security boundary. A worker runs as the user: one that unsets `MCV_TASK`
+  can record an answer to its own question, and one that sets it can write into another task's
+  log. mcv refuses the plain cases and the worker's rules forbid the rest.
+- herdr types the worker's `claude --settings ...` command at the pane's shell prompt, so it is in
+  that shell's history. It holds the task name and paths only.
+- `remove` leaves open the workspace herdr opened for the repository's main checkout on the first
+  spawn there.
 - SIGKILL to `spawn` while herdr creates the worktree can leave that worktree behind.
 - One concurrency check of the status-log lock failed once on GitHub's shared runner and could not
   be reproduced in 90 local runs; watch for repeated question ids in real use.

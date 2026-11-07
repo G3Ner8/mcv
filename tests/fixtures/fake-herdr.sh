@@ -10,7 +10,8 @@
 #                            SessionStart hook with the env from --settings,
 #                            as Claude with the plugin loaded does
 #                            (FAKE_NOHOOKS=1: as Claude without the plugin)
-#   agent get <name>         idle if <name> is in FAKE_DIR/agents, else agent_not_found
+#   agent get <name>         idle (or FAKE_AGENT_STATE) if <name> is in FAKE_DIR/agents,
+#                            else agent_not_found
 #   agent prompt <name> ...  reports working
 #   pane read <pane> ...     prints "screen of <pane>"
 # State lives in FAKE_DIR. Every call appends its arguments to FAKE_DIR/calls.
@@ -106,7 +107,7 @@ case "${1:-} ${2:-}" in
     ;;
   "agent get")
     grep -qxF "$3" "$D/agents" 2>/dev/null || fail agent_not_found "agent $3 not found"
-    echo '{"result":{"agent":{"agent_status":"idle"}}}'
+    printf '{"result":{"agent":{"agent_status":"%s"}}}\n' "${FAKE_AGENT_STATE:-idle}"
     ;;
   "status --json")
     if [[ -n "${FAKE_STATUS:-}" ]]; then printf '%s\n' "$FAKE_STATUS"; else

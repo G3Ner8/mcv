@@ -97,6 +97,28 @@ expect "that refusal names the trust dialog first, as the usual cause" \
   '[[ "$out" == *"trust"*"plugin is not loaded"* ]]' "$out"
 expect "that refused prompt sent nothing" '! grep -q "^agent prompt acme-t4" "$FAKE_DIR/calls"'
 
+# prompt with no text: an option where the text should be, or empty text,
+# is refused rather than sent (and then waited on for 10 minutes).
+for args in "--no-wait" "--timeout 5000" "" "   "; do
+  if [[ "$args" == --* ]]; then
+    # shellcheck disable=SC2086
+    out="$("$H" prompt acme/t3 $args 2>&1)"; rc=$?
+  else
+    out="$("$H" prompt acme/t3 "$args" --no-wait 2>&1)"; rc=$?
+  fi
+  expect "prompt with text '$args' refused" '[[ $rc -eq 1 && "$out" == *text* ]]' "rc=$rc $out"
+done
+expect "none of them was sent" '! grep -q "^agent prompt acme-t3" "$FAKE_DIR/calls"'
+
+# remove refuses a worker that is working or at a dialog: its tree can be
+# clean for a moment while it still works.
+for s in working blocked; do
+  out="$(FAKE_AGENT_STATE=$s "$H" remove acme/t3 2>&1)"; rc=$?
+  expect "remove refuses a $s worker" '[[ $rc -eq 1 && "$out" == *"$s"* && -f "$(meta acme t3)" ]]' "rc=$rc $out"
+done
+out="$("$H" remove acme/t3 2>&1)"; rc=$?
+expect "remove takes the same worker once it is idle" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+
 # remove after the user closed the worker's workspace: git removes the
 # worktree, the task goes, the branch stays.
 wt="$(jq -r .worktree "$(meta acme t1)")"

@@ -114,8 +114,10 @@ Run `H` with no arguments for every command and option.
 
 - `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.
-- `spawn` needs a branch name that does not exist yet, locally or on a remote; `main`, `master` and
-  `develop` are always refused (names are compared ignoring letter case). It fetches first, then
+- `spawn` needs a branch name that does not exist yet, locally, on a remote or as a tag; `main`,
+  `master`, `develop` and a remote's own name (`origin`) are always refused, and so is a name one
+  folder above or below an existing branch (`main/x`, or `feat` while `feat/x` exists). Names are
+  compared ignoring letter case. It fetches first, then
   starts the branch from the default branch of `origin` (for example `origin/main`), or of the only
   remote when none is called `origin`, or from `--base <ref>` if you give one, so a worker never
   starts from a stale or unrelated checkout. A repository with no remote starts from its current
@@ -138,10 +140,12 @@ Run `H` with no arguments for every command and option.
   the worker's new state; `read` shows what the worker said. When Claude runs the helper for you, its
   Bash tool stops waiting after 2 minutes unless given a longer timeout, so for long work use
   `prompt --no-wait`, which returns as soon as the worker has started, and check back with `read`.
-- `remove` refuses while the worktree has uncommitted or untracked files, or when git cannot read it.
-  Files your `.gitignore` ignores (build output, dependencies, a local `.env`) are deleted with the
-  worktree. The branch stays as a local branch; push it first if you need it elsewhere. It also works after you have closed the worker's
-  herdr workspace yourself.
+- `remove` refuses while the worker is working or waiting at a dialog, and while the worktree has
+  uncommitted or untracked files, or when git cannot read it. Files your `.gitignore` ignores
+  (build output, dependencies, a local `.env`) are deleted with the worktree. The branch stays as a
+  local branch; push it first if you need it elsewhere. It also works after you have closed the
+  worker's herdr workspace yourself. The workspace herdr opened for the repository's main checkout
+  stays open; close it in herdr when you no longer need it.
 - `prompt` refuses a worker that has not received mcv's rules (below), since it would never
   report its questions. Usually it is still at the folder trust dialog: pick "Yes" there and
   prompt again. Otherwise its Claude did not load the mcv plugin, which happens when mcv is

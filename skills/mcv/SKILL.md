@@ -205,8 +205,8 @@ Report per worker: id, repo and branch, state, open questions.
 
 - A worker: `BIN/mcv-herdr.sh remove <project>/<id>`, only when the user agrees. It closes the
   worker, deletes its worktree folder and task state, and keeps the branch as a local branch. It
-  refuses while the worktree has uncommitted or untracked files; then tell the user, whose call it
-  is.
+  refuses while the worker is working or at a dialog, and while the worktree has uncommitted or
+  untracked files; then tell the user, whose call it is.
 - The config: delete `.claude/mcv.json`.
 
 ## Operating rules

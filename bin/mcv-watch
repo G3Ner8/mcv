@@ -30,6 +30,9 @@
 # the same stop. A turn that ends with no log line, or after only a note,
 # does print it: then the coordinator reads the screen.
 #
+# A project with no tasks folder yet (nothing spawned, or a misspelt name)
+# is said once on stderr; the watcher keeps running.
+#
 # While herdr fails, log lines are still printed and worker states wait; one
 # warning goes to stderr per outage. A task whose meta cannot be read is
 # skipped until it can.
@@ -74,6 +77,11 @@ poll() {
   local dir="$1/$project" first=0 agents herdr_ok=1
   mkdir -p "$dir"
   [[ -e "$dir/.started" ]] || first=1
+  # A misspelt project name would otherwise watch nothing in silence.
+  if (( first )) && [[ ! -d "$tasks" ]]; then
+    printf 'mcv-watch: no tasks for project %s yet (%s); its events start once a worker is spawned\n' \
+      "$project" "$tasks" >&2
+  fi
   # The status logs do not need herdr, so their lines are still passed on
   # while herdr fails; only worker states wait. One warning per outage.
   if ! agents="$("$HERDR" agents 2>&1)"; then

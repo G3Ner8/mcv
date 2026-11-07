@@ -9,6 +9,7 @@
 #   mcv-status failed <text>           giving up, with the reason
 #   mcv-status note <text>             progress worth knowing; needs no answer
 # Quote the text; several words given without quotes are joined with spaces.
+# Empty text is refused (exit 2), as is an empty answer.
 #
 # The coordinator records an answer, which closes the question:
 #   mcv-status --task <project>/<id> answered <question-id> <text>
@@ -25,7 +26,8 @@
 # Both print nothing and exit 0 unless MCV_TASK names a task that exists.
 #
 # Each event is one line in ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/status.log:
-#   <UTC time>\t<kind>\t<question id or ->\t<text, tabs and newlines turned into spaces>
+#   <UTC time>\t<kind>\t<question id or ->\t<text, tabs and newlines turned into spaces,
+#   terminal escape sequences and other control characters removed>
 #
 # Exit: 0 ok; 1 error (bad MCV_TASK or unknown task, unknown or already
 # answered question);
@@ -96,8 +98,11 @@ append() {
   text="${text//$'\n'/ }"
   text="${text//$'\t'/ }"
   # Other control characters (a terminal escape, say) would reach the
-  # coordinator's screen as they are.
-  text="$(printf '%s' "$text" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+  # coordinator's screen as they are. Escape sequences go whole first (CSI
+  # such as a colour, and OSC such as a window title), or "[31m" would stay.
+  text="$(printf '%s' "$text" \
+    | LC_ALL=C sed -E -e $'s/\e\\[[0-9;?]*[ -/]*[@-~]//g' -e $'s/\e\\][^\a\e]*(\a|\e\\\\)//g' \
+    | LC_ALL=C tr -d '\000-\010\013-\037\177')"
   printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$kind" "$qid" "$text" >>"$log"
 }
 
@@ -170,6 +175,7 @@ case "${1:-}" in
   --task)
     [[ $# -ge 5 && ( "$3" == answered || "$3" == pending ) ]] \
       || usage "usage: --task <project>/<id> answered|pending <question-id> <text>"
+    [[ "${*:5}" =~ [^[:space:]] ]] || usage "the answer is empty; record what the user said"
     # Only the coordinator records answers; a worker closing its own question
     # would hide it from the user.
     [[ -z "${MCV_TASK:-}" ]] || die "a worker cannot record answers; only the coordinator does"
@@ -188,6 +194,7 @@ case "${1:-}" in
   needs-decision|blocked|done|failed|note)
     [[ -n "${MCV_TASK:-}" ]] || usage "MCV_TASK not set; only an mcv worker reports status"
     [[ $# -ge 2 ]] || usage "usage: $1 <text>"
+    [[ "${*:2}" =~ [^[:space:]] ]] || usage "$1 needs some text; say what the user should know"
     log="$(log_of "$MCV_TASK")" || exit 1
     lock_log "$log"
     # Text given without quotes comes as several arguments; keep all of it.

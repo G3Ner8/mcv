@@ -199,6 +199,22 @@ out="$(cd "$root" && CDPATH="$root/decoy" "$H" spawn acme t10 "$app" feat/ten --
 expect "a relative --context is not looked up through CDPATH" \
   '[[ $rc -eq 0 && "$(jq -r .context <<<"$out")" == "$ws" ]]' "rc=$rc $out"
 
+# A .worktreeinclude file that cannot be copied says why: on this base, deep
+# is a tracked file, so the main checkout's ignored deep/k.env (matched by
+# *.env) has no folder to go into.
+git -C "$app" checkout -q -b deepfile
+printf 'deep/k.env\n' >>"$app/.gitignore"
+echo "a file" >"$app/deep"
+git -C "$app" add .gitignore deep
+git -C "$app" commit -q -m "deep is a file"
+git -C "$app" checkout -q main
+mkdir -p "$app/deep"
+echo "x" >"$app/deep/k.env"
+out="$("$H" spawn acme t11 "$app" feat/eleven --base deepfile 2>&1)"; rc=$?
+expect "a .worktreeinclude file that cannot be copied gives the reason" \
+  '[[ $rc -eq 1 && "$out" == *"could not copy deep/k.env"*": "?* && $(printf "%s\n" "$out" | wc -l) -eq 1 ]]' "rc=$rc $out"
+rm -rf "$app/deep"
+
 # A relative --context is taken from the current folder.
 out="$(cd "$root" && "$H" spawn acme t5 "$app" feat/five --context "Acme Workspace" 2>&1)"; rc=$?
 expect "a relative --context resolves to an absolute path" \

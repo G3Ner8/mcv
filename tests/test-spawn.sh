@@ -140,6 +140,41 @@ touch -t 202001010000 "$MCV_HOME/.claims/acme-c1"
 out="$(spawn c1 "$repo" fix/c1 2>&1)"; rc=$?
 expect "an old claim without a pid is taken over" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 
+# Branch names git or a push would find ambiguous or in conflict are refused
+# up front, in one line: a remote's name, a tag's name, and a name that is a
+# folder of another branch or holds one (fix and fix/login cannot both exist).
+one_line() { [[ $(printf '%s\n' "$out" | wc -l) -eq 1 ]]; }
+git -C "$repo" tag v1
+for b in origin ORIGIN; do
+  out="$(spawn n1 "$repo" "$b" 2>&1)"; rc=$?
+  expect "branch '$b' (a remote's name) refused" '[[ $rc -eq 1 && "$out" == *remote* ]] && one_line' "rc=$rc $out"
+done
+for b in v1 V1; do
+  out="$(spawn n2 "$repo" "$b" 2>&1)"; rc=$?
+  expect "branch '$b' (a tag's name) refused" '[[ $rc -eq 1 && "$out" == *tag* ]] && one_line' "rc=$rc $out"
+done
+out="$(spawn n3 "$repo" main/x 2>&1)"; rc=$?
+expect "branch main/x (under the branch main) refused" '[[ $rc -eq 1 && "$out" == *"heads/main"* ]] && one_line' "rc=$rc $out"
+out="$(spawn n4 "$repo" feat 2>&1)"; rc=$?
+expect "branch feat (holding origin's feat/taken) refused" '[[ $rc -eq 1 && "$out" == *"feat/taken"* ]] && one_line' "rc=$rc $out"
+
+# mcv's own options after -- would go to Claude unnoticed.
+for o in --base --context; do
+  out="$(spawn n5 "$repo" fix/n5 -- "$o" x 2>&1)"; rc=$?
+  expect "$o after -- refused" '[[ $rc -eq 1 && "$out" == *"before --"* ]] && one_line' "rc=$rc $out"
+done
+
+# A bare repository has no checkout to make worktrees from.
+out="$(spawn n6 "$root/origin.git" fix/n6 2>&1)"; rc=$?
+expect "a bare repository is refused as bare" '[[ $rc -eq 1 && "$out" == *bare* ]] && one_line' "rc=$rc $out"
+
+# A context path with glob characters would make the deny rule a pattern
+# that misses the folder itself.
+mkdir -p "$root/ctx [1]"
+out="$(spawn n7 "$repo" fix/n7 --context "$root/ctx [1]" 2>&1)"; rc=$?
+expect "a context path with [ ] refused" '[[ $rc -eq 1 && "$out" == *"--context"* ]] && one_line' "rc=$rc $out"
+expect "none of these left a task" '[[ -z "$(ls "$MCV_HOME/acme/tasks" | grep "^n[0-9]")" ]]'
+
 # A relative MCV_HOME reaches the worker as an absolute path: the worker
 # runs in its worktree, where the relative one would point elsewhere.
 out="$(cd "$root" && MCV_HOME=relhome "$H" spawn acme r1 "$repo" fix/r1 2>&1)"; rc=$?
