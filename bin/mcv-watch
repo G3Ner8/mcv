@@ -279,7 +279,8 @@ holder() {
   pid="$(cat "$lock/pid" 2>/dev/null || true)"
   [[ "$pid" =~ ^[0-9]+$ ]] && ps -p "$pid" -o command= 2>/dev/null | grep -q mcv-watch && printf '%s' "$pid"
 }
-if ! mkdir "$lock" 2>/dev/null; then
+refuse_if_held() {
+  local pid
   # A watcher starting this instant has made the lock but not yet written
   # its pid.
   [[ -s "$lock/pid" ]] || sleep 1
@@ -288,10 +289,36 @@ if ! mkdir "$lock" 2>/dev/null; then
       "$project" "$pid" "$pid" >&2
     exit 1
   fi
-  rm -rf "$lock"
-  mkdir "$lock" 2>/dev/null \
-    || { printf 'mcv-watch: another watcher for %s started at the same moment\n' "$project" >&2; exit 1; }
-fi
+}
+# Taking over a stale lock is two steps, remove it and make a new one, so two
+# watchers that both found it stale could each remove the other's new lock
+# and both run. Only the holder of a second lock, watch.lock.takeover, may
+# remove the first, and it looks at the holder again first, since the lock
+# may have been taken over since. It writes its pid before letting go, so the
+# next one in sees a live holder and refuses. A watcher that finds the
+# takeover lock held waits and starts over. One left by a watcher killed
+# mid-takeover, which takes well under a second, is cleared after 5 seconds.
+takeover="$lock.takeover"
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+  refuse_if_held
+  if mkdir "$takeover" 2>/dev/null; then
+    trap 'rmdir "$takeover" 2>/dev/null' EXIT
+    [[ ! -e "$lock" ]] || { refuse_if_held; rm -rf "$lock"; }
+    if mkdir "$lock" 2>/dev/null; then
+      printf '%s\n' "$$" >"$lock/pid"
+      rmdir "$takeover"
+      trap - EXIT
+      break
+    fi
+    rmdir "$takeover"
+    trap - EXIT
+    continue
+  fi
+  sleep 0.2
+  waited=$((waited + 1))
+  (( waited < 25 )) || { rmdir "$takeover" 2>/dev/null; waited=0; }
+done
 printf '%s\n' "$$" >"$lock/pid"
 
 state="${MCV_WATCH_STATE:-}"

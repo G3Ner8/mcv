@@ -77,6 +77,7 @@ $MCV_HOME/
   .claims/<project>-<id>/pid          held during one spawn of that worker name
   .locks/<repo key>/pid               held while one spawn fetches and creates a worktree there
   <project>/watch.lock/pid            held by the one mcv-watch of that project
+  <project>/watch.lock.takeover/      held while one mcv-watch takes over a stale watch.lock
   <project>/tasks/<id>/
     meta                              JSON, written whole and renamed into place
     starting                          present until Claude has started
@@ -99,6 +100,9 @@ pid has exited without releasing it is taken over, but only when it is unchanged
 least 2 seconds old, so a lock another process has just taken is never deleted. A claim or repo lock
 with no pid (its holder was killed between making it and writing the pid) is taken over once it is
 a minute old. The watch lock holds only a pid and counts as held while that pid is an mcv-watch.
+A stale watch lock is removed only under `watch.lock.takeover`, whose holder checks the pid again
+and writes its own before letting go, so of several watchers starting together exactly one runs; a
+takeover lock left by a killed watcher is cleared after 5 seconds.
 
 **Watcher state** (in `$MCV_WATCH_STATE`, a temporary folder by default), one line per task in
 `<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last kind> <gone>
