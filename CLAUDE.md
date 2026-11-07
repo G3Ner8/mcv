@@ -9,7 +9,8 @@ rules below in full.
 ## Commands
 
 ```
-make check        lint, JSON and versions, the whole suite (under a minute); before every commit
+make check        lint, JSON and versions, version raised, the whole suite (under a minute);
+                  before every commit
 make test         the suite only (tests/run.sh; tests/run.sh test-x.sh runs one file)
 make lint         shellcheck
 ```
@@ -27,7 +28,9 @@ make lint         shellcheck
 - **One behaviour, four descriptions.** A command's behaviour is written in the usage header at the
   top of its script, in the README, in `skills/mcv/SKILL.md` and in `docs/architecture.md`. A change
   to what a command accepts, prints or refuses updates every one that mentions it.
-- **Versions move together.** `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  (`make json` checks these two) and the skill's `metadata.version` when the skill changed. The
-  marketplace version is the cache key: installed copies update only when it changes.
+- **A shipped change needs a new version.** Installed copies update only when the version
+  changes, so a change to `bin/`, `skills/`, `hooks/` or `.claude-plugin/` raises it in
+  `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and the skill's
+  `metadata.version` together, with a CHANGELOG section. `make json` checks the three match;
+  `make version-check` (in `make check`, and CI on pull requests) checks it was raised.
 - **Comments are plain prose** that say why. No markers or emoji in code comments.

@@ -33,13 +33,17 @@ docs/             architecture.md, adr/ (decision records)
 ## Checks
 
 ```
-make check        lint, JSON and versions, then the whole test suite (about a minute)
-make test         the test suite only
-make test-hooks   the hook-guard test alone (what CI runs)
-make lint         shellcheck: bin/ at style level, tests/ at warning level
+make check          lint, JSON and versions, the version check, then the whole test suite
+                    (about a minute)
+make test           the test suite only
+make test-hooks     the hook-guard test alone (what CI runs)
+make lint           shellcheck: bin/ at style level, tests/ at warning level
+make version-check  a change to bin/, skills/, hooks/ or .claude-plugin/ since origin/main
+                    (or BASE=<ref>) needs a new version
 ```
 
-Run `make check` before every commit. CI runs only lint, the JSON check and the hook-guard test: the
+Run `make check` before every commit. CI runs only lint, the JSON check, the version check (on
+pull requests) and the hook-guard test: the
 rest of the suite starts many processes at once or measures time, which a shared runner does
 badly, and the runner is kept light on purpose.
 
@@ -80,11 +84,16 @@ badly, and the runner is kept light on purpose.
 
 ## Releases
 
-mcv uses [SemVer](https://semver.org/). To release:
+mcv uses [SemVer](https://semver.org/). Claude Code keys its plugin cache on the version:
+`/plugin marketplace update` fetches new commits, but an installed copy is replaced only when the
+version changes (measured: a merge without one left the installed copy as it was). So every pull
+request that changes what users install (`bin/`, `skills/`, `hooks/`, `.claude-plugin/`) is a
+release, and CI refuses one that does not raise the version. To release:
 
-1. Set the same version in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
-   (`make json` checks they match) and in the skill's `metadata.version` if the skill changed.
-2. Move the `Unreleased` entries in `CHANGELOG.md` under the new version and date.
+1. Raise the version in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and the
+   skill's `metadata.version` (`make json` checks the three match): the patch number for fixes,
+   the minor number for new behaviour.
+2. Add a section for it in `CHANGELOG.md`, with the date.
 3. Merge, then tag the merge commit `vX.Y.Z` and push the tag.
 
-The marketplace version is the cache key: installed copies update only when it changes.
+Users then get it with `/plugin marketplace update mcv` and `/reload-plugins`.
