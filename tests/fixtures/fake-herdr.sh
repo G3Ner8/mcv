@@ -6,8 +6,12 @@
 #       runs `git worktree add -b`, which makes a remote-tracking base the
 #       branch's upstream, as herdr's worktree create does.
 #   worktree remove --workspace <ws>
-#   agent start <name> ...   adds <name> to FAKE_DIR/agents
-#   agent get <name>         idle if <name> is in FAKE_DIR/agents, else agent_not_found
+#   agent start <name> ...   adds <name> to FAKE_DIR/agents and runs mcv's
+#                            SessionStart hook with the env from --settings,
+#                            as Claude with the plugin loaded does
+#                            (FAKE_NOHOOKS=1: as Claude without the plugin)
+#   agent get <name>         idle (or FAKE_AGENT_STATE) if <name> is in FAKE_DIR/agents,
+#                            else agent_not_found
 #   agent prompt <name> ...  reports working
 #   pane read <pane> ...     prints "screen of <pane>"
 # State lives in FAKE_DIR. Every call appends its arguments to FAKE_DIR/calls.
@@ -86,11 +90,24 @@ case "${1:-} ${2:-}" in
   "agent start")
     [[ "${FAKE_FAIL:-}" != start ]] || fail agent_not_ready "claude did not start"
     printf '%s\n' "$3" >>"$D/agents"
+    # Claude with the mcv plugin loaded runs its SessionStart hook, with the
+    # env that --settings carries.
+    if [[ "${FAKE_NOHOOKS:-}" != 1 ]]; then
+      settings=""
+      while [[ $# -gt 0 ]]; do
+        [[ "$1" == --settings ]] && { settings="$2"; break; }
+        shift
+      done
+      src="${BASH_SOURCE[0]}"
+      [[ ! -L "$src" ]] || src="$(readlink "$src")"
+      MCV_TASK="$(jq -r .env.MCV_TASK <<<"$settings")" MCV_HOME="$(jq -r .env.MCV_HOME <<<"$settings")" \
+        "$(dirname "$src")/../../bin/mcv-status" --contract >/dev/null
+    fi
     echo '{"result":{}}'
     ;;
   "agent get")
     grep -qxF "$3" "$D/agents" 2>/dev/null || fail agent_not_found "agent $3 not found"
-    echo '{"result":{"agent":{"agent_status":"idle"}}}'
+    printf '{"result":{"agent":{"agent_status":"%s"}}}\n' "${FAKE_AGENT_STATE:-idle}"
     ;;
   "status --json")
     if [[ -n "${FAKE_STATUS:-}" ]]; then printf '%s\n' "$FAKE_STATUS"; else

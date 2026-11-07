@@ -12,7 +12,7 @@ it:
 - When the repository sits inside a project folder that holds several repositories, Claude Code
   loads that folder's CLAUDE.md and CLAUDE.local.md as a parent of the session's folder, and its
   skills through symlinks. From a worktree elsewhere, none of that loads, and a path such as
-  `../plans/lots.md` in the repository's notes points at nothing.
+  `../plans/menu-v2.md` in the repository's notes points at nothing.
 - Files git ignores do not come along: a test account's `.env`, local settings.
 
 Measured on a real app repository: dependencies install in about a minute in a fresh worktree, but

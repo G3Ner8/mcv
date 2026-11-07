@@ -243,6 +243,85 @@ else
   ok "once readable again (skipped: running as root)"
 fi
 
+# An answer the coordinator could not send because the worker was still busy
+# after asking is kept as pending; the watcher hands it back, as one deliver
+# event, when the worker stops. Without it the turn end was suppressed (the
+# last log line is the question) and both sides waited for ever.
+# Project "brew", so the acme tasks above stay out of it.
+export MCV_WATCH_STATE="$root/state3"
+mkdir -p "$MCV_WATCH_STATE"
+btask() { mkdir -p "$MCV_HOME/brew/tasks/$1"; printf '{"task":"brew/%s","pane_id":"%s"}\n' "$1" "$2" >"$MCV_HOME/brew/tasks/$1/meta"; }
+bsay() { MCV_TASK="brew/$1" "$STATUS" "$2" "$3" >/dev/null; }
+bpend() { env -u MCV_TASK "$STATUS" --task "brew/$1" pending "$2" "$3" >/dev/null; }
+bans() { env -u MCV_TASK "$STATUS" --task "brew/$1" answered "$2" "$3" >/dev/null; }
+bpoll() { "$W" brew --once; }
+TAB=$'\t'
+
+btask j b:p1
+agents "b:p1,working,1,brew-j"
+bpoll >/dev/null
+bsay j needs-decision "Per drink or per order?"
+out="$(bpoll)"
+expect "pending: the question is shown while the worker still works" '[[ "$out" == *"needs-decision${TAB}q1${TAB}"* ]]' "$out"
+bpend j q1 "per drink"
+out="$(bpoll)"
+expect "pending recorded while the worker works: no event yet" '[[ -z "$out" ]]' "$out"
+agents "b:p1,done,2,brew-j"
+out="$(bpoll)"
+expect "worker stops with a pending answer: one event" '[[ $(count "$out") -eq 1 ]]' "$out"
+expect "that event is deliver, with the question id and the answer" \
+  '[[ "$out" == *"brew/j${TAB}deliver${TAB}q1${TAB}per drink" ]]' "$out"
+out="$(bpoll)"
+expect "deliver is not repeated while nothing changes" '[[ -z "$out" ]]' "$out"
+agents "b:p1,idle,3,brew-j"
+out="$(bpoll)"
+expect "done -> idle does not repeat deliver" '[[ -z "$out" ]]' "$out"
+bans j q1 "per drink"
+agents "b:p1,working,4,brew-j"; bpoll >/dev/null
+agents "b:p1,done,5,brew-j"
+out="$(bpoll)"
+expect "once answered, a later stop has no deliver" '[[ "$out" != *deliver* ]]' "$out"
+
+# The worker had already stopped when the pending answer was recorded.
+btask k b:p2
+agents "b:p1,done,5,brew-j|b:p2,working,1,brew-k"
+bpoll >/dev/null
+bsay k needs-decision "Round up?"
+agents "b:p1,done,5,brew-j|b:p2,done,2,brew-k"
+bpoll >/dev/null
+bpend k q1 "no"
+out="$(bpoll)"
+expect "pending recorded after the worker stopped: deliver at once" '[[ "$out" == *"brew/k${TAB}deliver${TAB}q1${TAB}no" ]]' "$out"
+bans k q1 "no"
+
+# herdr down when the pending answer is read: deliver once herdr is back.
+btask l b:p3
+agents "b:p1,done,5,brew-j|b:p2,done,2,brew-k|b:p3,working,1,brew-l"
+bpoll >/dev/null
+bsay l needs-decision "Which cup size?"
+agents "b:p1,done,5,brew-j|b:p2,done,2,brew-k|b:p3,idle,2,brew-l"
+bpoll >/dev/null
+bpend l q1 "medium"
+out="$(STUB_DOWN=1 bpoll 2>/dev/null)"
+expect "herdr down: no deliver yet" '[[ "$out" != *deliver* ]]' "$out"
+out="$(bpoll)"
+expect "herdr back: the pending answer is delivered" '[[ "$out" == *"brew/l${TAB}deliver${TAB}q1${TAB}medium" ]]' "$out"
+
+# A watcher started later shows a pending answer as deliver, not the question
+# again, so the user is not asked twice.
+export MCV_WATCH_STATE="$root/state4"
+mkdir -p "$MCV_WATCH_STATE"
+out="$(bpoll 2>/dev/null)"
+expect "new watcher: a stopped worker's pending answer is delivered" '[[ "$out" == *"brew/l${TAB}deliver${TAB}q1${TAB}medium" ]]' "$out"
+expect "new watcher: its question is not shown again" '[[ "$out" != *"Which cup size?"* ]]' "$out"
+
+# A project with no tasks folder (a misspelt name, or nothing spawned yet)
+# is said once on stderr, so a silent watcher is not mistaken for a quiet one.
+out="$(MCV_WATCH_STATE="$root/state5" "$W" nosuch --once 2>&1 >/dev/null)"; rc=$?
+expect "a project with no tasks is named on stderr" '[[ $rc -eq 0 && "$out" == *"no tasks"*"nosuch"* ]]' "rc=$rc $out"
+out="$(MCV_WATCH_STATE="$root/state5" "$W" nosuch --once 2>&1 >/dev/null)"
+expect "and only once" '[[ -z "$out" ]]' "$out"
+
 # The long-running watcher stops at once on TERM, not after its interval.
 MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
 wpid=$!
@@ -252,6 +331,39 @@ kill -TERM "$wpid"
 wait "$wpid" 2>/dev/null
 took=$(( $(date +%s) - start ))
 expect "TERM stops the watcher within 2 seconds (interval 30)" '[[ $took -le 2 ]]' "took ${took}s"
+
+# One watcher per project: a second one refuses, naming the first's pid, so
+# no event is printed twice. A watcher that died without cleaning up does not
+# block the next.
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
+wpid=$!
+sleep 1
+# Run in the background and stopped after a second, so a watcher that does
+# not refuse fails this check instead of hanging the suite.
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >"$root/w2.out" 2>&1 &
+w2=$!
+sleep 1
+if kill -0 "$w2" 2>/dev/null; then
+  kill -TERM "$w2"; wait "$w2" 2>/dev/null; rc=running
+else
+  wait "$w2"; rc=$?
+fi
+out="$(cat "$root/w2.out")"
+expect "a second watcher for the same project refuses at once" \
+  '[[ $rc == 1 && "$out" == *"already running"*"$wpid"* ]]' "rc=$rc $out"
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" brew >/dev/null 2>&1 &
+bpid=$!
+sleep 1
+expect "a watcher for another project runs alongside" 'kill -0 "$bpid" 2>/dev/null'
+kill -TERM "$wpid" "$bpid"; wait "$wpid" "$bpid" 2>/dev/null
+sleep 0 & dead=$!; wait "$dead"
+mkdir -p "$MCV_HOME/acme/watch.lock"; echo "$dead" >"$MCV_HOME/acme/watch.lock/pid"
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
+wpid=$!
+sleep 1
+expect "a lock left by a dead watcher is taken over" 'kill -0 "$wpid" 2>/dev/null'
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+expect "a stopped watcher releases its lock" '[[ ! -e "$MCV_HOME/acme/watch.lock" ]]'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

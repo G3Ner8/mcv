@@ -5,24 +5,33 @@
 # wakes the coordinator for a turn, so only lines worth a turn are printed.
 #
 # Usage:
-#   mcv-watch <project>            poll every MCV_WATCH_INTERVAL seconds (default 5) until killed
+#   mcv-watch <project>            poll every MCV_WATCH_INTERVAL seconds (default 5) until killed;
+#                                  exits 1 at once if a watcher for <project> already runs
+#                                  (lock: $MCV_HOME/<project>/watch.lock)
 #   mcv-watch <project> --once     one poll, keeping state in MCV_WATCH_STATE (for tests)
 #
 # Printed, one line per event, tab-separated:
 #   <time> <project>/<id> state blocked         a worker stopped at an approval or question dialog
 #   <time> <project>/<id> state done            a worker's turn ended (see below)
 #   <time> <project>/<id> <kind> <qid|-> <text> a new line in the worker's status log
+#   <time> <project>/<id> deliver <qid> <text>  an answer kept as pending, now that the
+#                                               worker has stopped: send it, then record it
 #   <time> <project>/<id> gone -                the worker's pane is no longer there
 #                                               (not while spawn is still starting it)
 #
 # Not printed: changes to working, idle or unknown; the coordinator's own
-# "answered" lines; anything already in a log when the watcher starts,
-# except questions that have no answered line yet, which are printed once
-# so a coordinator started later still sees them.
+# "answered" and "pending" lines; anything already in a log when the watcher
+# starts, except questions that have no answered or pending line yet, which
+# are printed once so a coordinator started later still sees them, and
+# pending answers, which come as deliver once the worker has stopped.
 # "state done" is also skipped when the worker's last log line since its
 # previous state event was needs-decision, blocked, done or failed, because
-# that line already woke the coordinator. A turn that ends with no log line,
-# or after only a note, does print it: then the coordinator reads the screen.
+# that line already woke the coordinator, and when a deliver goes out for
+# the same stop. A turn that ends with no log line, or after only a note,
+# does print it: then the coordinator reads the screen.
+#
+# A project with no tasks folder yet (nothing spawned, or a misspelt name)
+# is said once on stderr; the watcher keeps running.
 #
 # While herdr fails, log lines are still printed and worker states wait; one
 # warning goes to stderr per outage. A task whose meta cannot be read is
@@ -59,13 +68,20 @@ tasks="$MCV_HOME/$project/tasks"
 
 # One poll. The state folder has one subfolder per project, so watchers of
 # two projects can share it; per task it keeps one line:
-#   <pane> <last state> <last change counter> <log lines read> <kind of last printed log line> <gone 0|1>
-# The pane names the task's current worker: a task removed and spawned again
+#   <pane> <last state> <last change counter> <log lines read> <kind of last printed log line> <gone 0|1> <owe 0|1>
+# owe is 1 when a pending line was read but the worker's state could not be
+# checked yet (herdr down); the next poll then delivers it if the worker has
+# stopped. The pane names the task's current worker: a task removed and spawned again
 # under the same id, even within one poll, gets a new pane and a fresh start.
 poll() {
   local dir="$1/$project" first=0 agents herdr_ok=1
   mkdir -p "$dir"
   [[ -e "$dir/.started" ]] || first=1
+  # A misspelt project name would otherwise watch nothing in silence.
+  if (( first )) && [[ ! -d "$tasks" ]]; then
+    printf 'mcv-watch: no tasks for project %s yet (%s); its events start once a worker is spawned\n' \
+      "$project" "$tasks" >&2
+  fi
   # The status logs do not need herdr, so their lines are still passed on
   # while herdr fails; only worker states wait. One warning per outage.
   if ! agents="$("$HERDR" agents 2>&1)"; then
@@ -99,16 +115,17 @@ poll() {
     log="$tdir/status.log"
     sf="$dir/$id"
 
-    local spane=- prev=- prev_seq=- offset=0 lastkind=- gone=0 new=1 damaged=0
+    local spane=- prev=- prev_seq=- offset=0 lastkind=- gone=0 owe=0 new=1 damaged=0
     if [[ -f "$sf" ]]; then
-      read -r spane prev prev_seq offset lastkind gone <"$sf" || true
+      read -r spane prev prev_seq offset lastkind gone owe <"$sf" || true
+      [[ "$owe" =~ ^[01]$ ]] || owe=0
       if [[ ! "$offset" =~ ^[0-9]+$ || ! "$gone" =~ ^[01]$ || -z "$lastkind" ]]; then
         damaged=1
       elif [[ "$spane" == "$pane" ]]; then
         new=0
       fi
       if (( new )); then
-        prev=- prev_seq=- offset=0 lastkind=- gone=0
+        prev=- prev_seq=- offset=0 lastkind=- gone=0 owe=0
       fi
     fi
 
@@ -120,17 +137,27 @@ poll() {
     fi
     # On the watcher's first poll, old lines are history, not events, except
     # questions still without an answer: a coordinator that starts after
-    # they were asked must still see them. A damaged state line cannot say
-    # what was read, so it is handled the same way. A task first seen later
-    # is new, so its log is followed from the start.
+    # they were asked must still see them. A question the user already
+    # answered, kept as pending, is not asked again; it is owed a deliver
+    # instead. A damaged state line cannot say what was read, so it is
+    # handled the same way. A task first seen later is new, so its log is
+    # followed from the start.
     if (( (new && first) || damaged )); then
       if (( lines > 0 )); then
         local open
         open="$(awk -F'\t' -v t="$task" '
           $2 == "needs-decision" { q[$3] = $1 "\t" t "\t" $2 "\t" $3 "\t" $4; order[++n] = $3 }
-          $2 == "answered"       { delete q[$3] }
-          END { for (i = 1; i <= n; i++) if (order[i] in q) { print q[order[i]]; delete q[order[i]] } }
+          $2 == "pending"        { p[$3] = 1 }
+          $2 == "answered"       { delete q[$3]; delete p[$3] }
+          END {
+            for (i = 1; i <= n; i++) if ((order[i] in q) && !(order[i] in p)) { print q[order[i]]; delete q[order[i]] }
+            for (k in p) { print "#owe"; exit }
+          }
         ' "$log" 2>/dev/null || true)"
+        if [[ "$open" == *"#owe"* ]]; then
+          owe=1
+          open="$(grep -vx '#owe' <<<"$open" || true)"
+        fi
         if [[ -n "$open" ]]; then
           printf '%s\n' "$open"
           lastkind=needs-decision
@@ -148,6 +175,12 @@ poll() {
         # A blank or broken line is not an event, and must not become the
         # "last kind" (an empty one would read as damaged state next poll).
         [[ -z "$kind" || "$kind" == answered ]] && continue
+        # The coordinator's own pending answer: owed back once the worker
+        # stops, never printed as it is.
+        if [[ "$kind" == pending ]]; then
+          owe=1
+          continue
+        fi
         printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$task" "$kind" "$qid" "$text"
         lastkind="$kind"
       done < <(tail -n +"$((offset + 1))" "$log" | head -n "$((lines - offset))")
@@ -156,7 +189,7 @@ poll() {
 
     local row status seq
     if (( ! herdr_ok )); then
-      printf '%s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" >"$sf"
+      printf '%s %s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" "$owe" >"$sf"
       continue
     fi
     row="$(awk -F'\t' -v p="$pane" '$1 == p { print $2 " " $3; exit }' <<<"$agents")"
@@ -173,10 +206,37 @@ poll() {
       gone=0
       status="${row%% *}"
       seq="${row#* }"
+      # A pending answer goes back to the coordinator when the worker stops
+      # (done or idle), or at once if it had already stopped when the answer
+      # was recorded. done -> idle is only the output being viewed, not a
+      # new stop, so it does not repeat the deliver.
+      local delivered=0
+      if [[ "$status" == "done" || "$status" == idle ]]; then
+        local stopnow=0 pend line
+        if [[ "$prev" != "done" && "$prev" != idle ]] || [[ "$status" == "done" && "$seq" != "$prev_seq" ]]; then
+          stopnow=1
+        fi
+        if (( stopnow || owe )); then
+          pend="$(awk -F'\t' '
+            $2 == "pending"  { if (!($3 in p)) order[++n] = $3; p[$3] = $4 }
+            $2 == "answered" { delete p[$3] }
+            END { for (i = 1; i <= n; i++) if (order[i] in p) print order[i] "\t" p[order[i]] }
+          ' "$log" 2>/dev/null || true)"
+          if [[ -n "$pend" ]]; then
+            while IFS= read -r line; do
+              printf '%s\t%s\tdeliver\t%s\n' "$now" "$task" "$line"
+            done <<<"$pend"
+            delivered=1
+          fi
+        fi
+      fi
+      owe=0
       # A new state, or the same state with a moved counter (a whole turn
       # happened between two polls), counts as a transition.
       if [[ ( "$status" == blocked || "$status" == "done" ) && ( "$status" != "$prev" || "$seq" != "$prev_seq" ) ]]; then
-        if [[ "$status" == "done" ]] && [[ "$lastkind" =~ ^(needs-decision|blocked|done|failed)$ ]]; then
+        if (( delivered )); then
+          :
+        elif [[ "$status" == "done" ]] && [[ "$lastkind" =~ ^(needs-decision|blocked|done|failed)$ ]]; then
           :
         else
           printf '%s\t%s\tstate\t%s\n' "$now" "$task" "$status"
@@ -187,7 +247,7 @@ poll() {
       prev_seq="$seq"
     fi
 
-    printf '%s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" >"$sf"
+    printf '%s %s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" "$owe" >"$sf"
   done
 
   touch "$dir/.started"
@@ -200,13 +260,42 @@ if [[ -n "$once" ]]; then
   exit 0
 fi
 
+# One watcher per project. A second one would print every event twice, and
+# a coordinator can lose track of the one it started (a context compaction,
+# say). The lock holds the watcher's pid; it counts as held only while that
+# pid is still an mcv-watch, so a crashed watcher's lock, or its pid reused
+# by another program, does not block the next one.
+lock="$MCV_HOME/$project/watch.lock"
+mkdir -p "$MCV_HOME/$project"
+holder() {
+  local pid
+  pid="$(cat "$lock/pid" 2>/dev/null || true)"
+  [[ "$pid" =~ ^[0-9]+$ ]] && ps -p "$pid" -o command= 2>/dev/null | grep -q mcv-watch && printf '%s' "$pid"
+}
+if ! mkdir "$lock" 2>/dev/null; then
+  # A watcher starting this instant has made the lock but not yet written
+  # its pid.
+  [[ -s "$lock/pid" ]] || sleep 1
+  if pid="$(holder)"; then
+    printf 'mcv-watch: a watcher for %s is already running (pid %s); use that one, or if no session is reading it, stop it with: kill %s\n' \
+      "$project" "$pid" "$pid" >&2
+    exit 1
+  fi
+  rm -rf "$lock"
+  mkdir "$lock" 2>/dev/null \
+    || { printf 'mcv-watch: another watcher for %s started at the same moment\n' "$project" >&2; exit 1; }
+fi
+printf '%s\n' "$$" >"$lock/pid"
+
 state="${MCV_WATCH_STATE:-}"
+tmpstate=""
 if [[ -z "$state" ]]; then
   state="$(mktemp -d)"
-  # The Monitor tool stops the watcher with a signal, usually mid-sleep.
-  trap 'rm -rf "$state"; exit 0' INT TERM
-  trap 'rm -rf "$state"' EXIT
+  tmpstate="$state"
 fi
+# The Monitor tool stops the watcher with a signal, usually mid-sleep.
+trap 'exit 0' INT TERM
+trap 'rm -rf "$lock"; [[ -z "$tmpstate" ]] || rm -rf "$tmpstate"' EXIT
 mkdir -p "$state"
 while true; do
   poll "$state"

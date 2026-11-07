@@ -77,10 +77,47 @@ expect "read reads the worker's pane, agent or not" \
 # A worker that failed to start and was then let through takes a prompt,
 # which clears its marker.
 echo "acme-t2" >>"$FAKE_DIR/agents"
+MCV_TASK=acme/t2 "$(dirname "$H")/mcv-status" --contract >/dev/null
 out="$("$H" prompt acme/t2 "hello" --no-wait 2>&1)"; rc=$?
 expect "prompt to a worker let through after a failed start succeeds" \
   '[[ $rc -eq 0 && "$out" == *working* ]]' "rc=$rc $out"
 expect "that prompt clears the starting marker" '[[ ! -e "$MCV_HOME/acme/tasks/t2/starting" ]]'
+
+# A worker whose Claude did not load mcv's hooks (the plugin is not installed
+# for it) has none of the worker rules: prompt refuses to give it work.
+out="$("$H" spawn acme t3 "$repo" fix/t3 2>&1)"; rc=$?
+expect "a worker with mcv's hooks has the rules-loaded marker" \
+  '[[ $rc -eq 0 && -f "$MCV_HOME/acme/tasks/t3/rules-loaded" ]]' "rc=$rc $out"
+out="$(FAKE_NOHOOKS=1 "$H" spawn acme t4 "$repo" fix/t4 2>&1)"; rc=$?
+expect "spawn of a worker without hooks still succeeds" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+out="$("$H" prompt acme/t4 "hello" --no-wait 2>&1)"; rc=$?
+expect "prompt refuses a worker that never got mcv's rules" \
+  '[[ $rc -eq 1 && "$out" == *"has no mcv worker rules yet"* && $(printf "%s\n" "$out" | wc -l) -eq 1 ]]' "rc=$rc $out"
+expect "that refusal names the trust dialog first, as the usual cause" \
+  '[[ "$out" == *"trust"*"plugin is not loaded"* ]]' "$out"
+expect "that refused prompt sent nothing" '! grep -q "^agent prompt acme-t4" "$FAKE_DIR/calls"'
+
+# prompt with no text: an option where the text should be, or empty text,
+# is refused rather than sent (and then waited on for 10 minutes).
+for args in "--no-wait" "--timeout 5000" "" "   "; do
+  if [[ "$args" == --* ]]; then
+    # shellcheck disable=SC2086
+    out="$("$H" prompt acme/t3 $args 2>&1)"; rc=$?
+  else
+    out="$("$H" prompt acme/t3 "$args" --no-wait 2>&1)"; rc=$?
+  fi
+  expect "prompt with text '$args' refused" '[[ $rc -eq 1 && "$out" == *text* ]]' "rc=$rc $out"
+done
+expect "none of them was sent" '! grep -q "^agent prompt acme-t3" "$FAKE_DIR/calls"'
+
+# remove refuses a worker that is working or at a dialog: its tree can be
+# clean for a moment while it still works.
+for s in working blocked; do
+  out="$(FAKE_AGENT_STATE=$s "$H" remove acme/t3 2>&1)"; rc=$?
+  expect "remove refuses a $s worker" '[[ $rc -eq 1 && "$out" == *"$s"* && -f "$(meta acme t3)" ]]' "rc=$rc $out"
+done
+out="$("$H" remove acme/t3 2>&1)"; rc=$?
+expect "remove takes the same worker once it is idle" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 
 # remove after the user closed the worker's workspace: git removes the
 # worktree, the task goes, the branch stays.

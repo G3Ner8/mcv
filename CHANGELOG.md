@@ -14,8 +14,8 @@ merge request, is still to do.
 
 - `bin/mcv-herdr.sh`, the only file that calls herdr: `doctor`, `spawn`, `prompt`, `read`, `agents`,
   `remove`.
-  - A worker gets `MCV_TASK` and `MCV_HOME` through Claude's own `--settings`, so nothing is typed
-    into its shell first.
+  - A worker gets `MCV_TASK` and `MCV_HOME` through Claude's own `--settings`, so no export is
+    typed into its shell first (herdr does type the `claude` command line itself).
   - `spawn` fetches and branches from the remote's default branch, or `--base <ref>`. It refuses a
     branch that already exists, locally or on a remote, compared ignoring case, and always
     `main`/`master`/`develop`, since herdr would check an existing branch out as it is. It clears
@@ -28,13 +28,31 @@ merge request, is still to do.
     decided by the worktree's own git so nothing committed is overwritten.
   - `prompt --no-wait` returns as soon as the worker starts, so a caller is never held past Claude
     Code's 2-minute Bash limit. `remove` works after the user closed the worker's workspace.
+  - `prompt` refuses a worker whose Claude did not load mcv's hooks (no `rules-loaded` marker from
+    its SessionStart hook), which would otherwise work with no git rules and never report; the
+    message names the folder trust dialog first, the usual cause, which herdr reports as idle.
+  - The base defaults to the only remote's default branch when no remote is called `origin`, and
+    several remotes with no `origin` need `--base`, instead of branching from HEAD.
+  - A relative `MCV_HOME` is made absolute before it reaches the worker.
+  - A claim or lock with no pid is taken over once a minute old; a refused claim names its folder.
+  - `spawn` refuses up front, in one line, what git would trip on later: a branch named like a
+    tag or a remote, one folder above or below an existing branch, a bare repository, mcv's own
+    options after `--`, and a `--context` path with glob characters. A `.worktreeinclude` file
+    that cannot be copied says why.
+  - `prompt` refuses a missing or empty text; `remove` refuses a worker that is working or at a
+    dialog.
 - `bin/mcv-status`: the worker's append-only status log (`needs-decision` with a numbered question,
   `blocked`, `done`, `failed`, `note`). Writes hold a lock, so question ids never repeat. The
-  coordinator closes a question with `--task <project>/<id> answered`; a worker cannot. It also
+  coordinator closes a question with `--task <project>/<id> answered`; a worker cannot. Text
+  given without quotes is kept whole; empty text is refused; terminal escape sequences are removed
+  whole. An answer
+  to a worker still busy after asking is kept with `--task ... pending` until it can be sent. It also
   prints the rules the hooks give a worker: a fixed git floor (its own branch only, no force-push,
   no secrets), then the project's own git rules, or common practice where a project has none.
 - `bin/mcv-watch <project>`: one event stream for Claude Code's Monitor tool. Prints only what is
-  worth a coordinator turn, and on start the questions still open. Survives damaged state, an
+  worth a coordinator turn, and on start the questions still open. A pending answer comes back as
+  a `deliver` event when the worker stops. One watcher per project: a second one exits at once,
+  naming the first's pid. Survives damaged state, an
   unreadable log and herdr being down; stops at once on TERM.
 - `hooks/hooks.json`: SessionStart gives a worker its rules; PreToolUse refuses AskUserQuestion with
   directions to `mcv-status needs-decision`. Both do nothing unless `MCV_TASK` names a task mcv
@@ -44,6 +62,6 @@ merge request, is still to do.
   it, keeps at most `max_workers` active, labels questions `<task id> #<n>`, writes into each task
   the facts the worker cannot find itself, reads the worker's screen before sending an answer, and
   never answers a question or approves a dialog for the user.
-- Tests: 300 checks in `tests/`, against a fake herdr that does the git work for real, passing on
-  macOS (bash 3.2) and Ubuntu 24.04. Three adversarial QA passes; every fix came with a regression
-  test that failed before it.
+- Tests: 364 checks in `tests/`, against a fake herdr that does the git work for real, passing on
+  macOS (bash 3.2); the first 300 also on Ubuntu 24.04. Four adversarial QA passes; every fix came
+  with a regression test that failed before it.

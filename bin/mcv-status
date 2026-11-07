@@ -8,18 +8,26 @@
 #   mcv-status done <text>             the task is finished
 #   mcv-status failed <text>           giving up, with the reason
 #   mcv-status note <text>             progress worth knowing; needs no answer
+# Quote the text; several words given without quotes are joined with spaces.
+# Empty text is refused (exit 2), as is an empty answer.
 #
 # The coordinator records an answer, which closes the question:
 #   mcv-status --task <project>/<id> answered <question-id> <text>
-# (refused when MCV_TASK is set: a worker never closes its own questions)
+# or, when the worker was still busy and the answer could not be sent yet,
+# keeps it for later; mcv-watch prints it as a deliver event once the worker
+# stops, and the question stays open until answered:
+#   mcv-status --task <project>/<id> pending <question-id> <text>
+# (both refused when MCV_TASK is set: a worker never closes its own questions)
 #
 # mcv's hooks call:
-#   mcv-status --contract              SessionStart: the rules a worker follows
+#   mcv-status --contract              SessionStart: the rules a worker follows;
+#                                      also leaves <task>/rules-loaded
 #   mcv-status --deny-ask              PreToolUse on AskUserQuestion: refuse it
 # Both print nothing and exit 0 unless MCV_TASK names a task that exists.
 #
 # Each event is one line in ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/status.log:
-#   <UTC time>\t<kind>\t<question id or ->\t<text, tabs and newlines turned into spaces>
+#   <UTC time>\t<kind>\t<question id or ->\t<text, tabs and newlines turned into spaces,
+#   terminal escape sequences and other control characters removed>
 #
 # Exit: 0 ok; 1 error (bad MCV_TASK or unknown task, unknown or already
 # answered question);
@@ -90,8 +98,11 @@ append() {
   text="${text//$'\n'/ }"
   text="${text//$'\t'/ }"
   # Other control characters (a terminal escape, say) would reach the
-  # coordinator's screen as they are.
-  text="$(printf '%s' "$text" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+  # coordinator's screen as they are. Escape sequences go whole first (CSI
+  # such as a colour, and OSC such as a window title), or "[31m" would stay.
+  text="$(printf '%s' "$text" \
+    | LC_ALL=C sed -E -e $'s/\e\\[[0-9;?]*[ -/]*[@-~]//g' -e $'s/\e\\][^\a\e]*(\a|\e\\\\)//g' \
+    | LC_ALL=C tr -d '\000-\010\013-\037\177')"
   printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$kind" "$qid" "$text" >>"$log"
 }
 
@@ -135,7 +146,7 @@ Git, always (mcv's floor, whatever else applies):
 - Never commit secrets (.env files, tokens, keys).
 
 Git, everything else: follow this project's own git rules (CLAUDE.md, CONTRIBUTING) where they exist; they win. Where they say nothing:
-- Small commits, one change each, in Conventional Commits form ("fix: redirect after login"), imperative, subject at most 72 characters.
+- Small commits, one change each, in Conventional Commits form ("fix: add oat-milk surcharge to cart total"), imperative, subject at most 72 characters.
 - Run the project's tests and linters before committing, if it has them.
 - Before handing in, rebase onto the latest base branch.
 - Finish by pushing your branch and opening a draft pull or merge request that says what changed, why, and how it was tested; then report done.
@@ -147,6 +158,9 @@ case "${1:-}" in
   # Anything else (unset, malformed, a task already removed) is not a worker.
   --contract)
     is_task "${MCV_TASK:-}" || exit 0
+    # Proof that this worker's Claude loaded mcv's hooks: prompt refuses a
+    # worker without it, since that worker has none of the rules below.
+    : >"$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}/rules-loaded" 2>/dev/null || true
     jq -cn --arg ctx "$(contract_text)" \
       '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
     ;;
@@ -159,7 +173,9 @@ case "${1:-}" in
     ;;
 
   --task)
-    [[ $# -eq 5 && "$3" == answered ]] || usage "usage: --task <project>/<id> answered <question-id> <text>"
+    [[ $# -ge 5 && ( "$3" == answered || "$3" == pending ) ]] \
+      || usage "usage: --task <project>/<id> answered|pending <question-id> <text>"
+    [[ "${*:5}" =~ [^[:space:]] ]] || usage "the answer is empty; record what the user said"
     # Only the coordinator records answers; a worker closing its own question
     # would hide it from the user.
     [[ -z "${MCV_TASK:-}" ]] || die "a worker cannot record answers; only the coordinator does"
@@ -172,21 +188,23 @@ case "${1:-}" in
     fi
     ! cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
       || die "question $qid in task $2 is already answered"
-    append "$log" answered "$qid" "$5"
+    append "$log" "$3" "$qid" "${*:5}"
     ;;
 
   needs-decision|blocked|done|failed|note)
     [[ -n "${MCV_TASK:-}" ]] || usage "MCV_TASK not set; only an mcv worker reports status"
     [[ $# -ge 2 ]] || usage "usage: $1 <text>"
+    [[ "${*:2}" =~ [^[:space:]] ]] || usage "$1 needs some text; say what the user should know"
     log="$(log_of "$MCV_TASK")" || exit 1
     lock_log "$log"
+    # Text given without quotes comes as several arguments; keep all of it.
     if [[ "$1" == needs-decision ]]; then
       n=1
       [[ -f "$log" ]] && n=$(( $(cut -f2 "$log" | grep -cx needs-decision || true) + 1 ))
-      append "$log" needs-decision "q$n" "$2"
+      append "$log" needs-decision "q$n" "${*:2}"
       printf 'q%d\n' "$n"
     else
-      append "$log" "$1" - "$2"
+      append "$log" "$1" - "${*:2}"
     fi
     ;;
 

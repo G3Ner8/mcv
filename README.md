@@ -36,7 +36,8 @@ run (use Claude Code subagents inside one session).
   must show `claude: current`. Updating herdr does not refresh it, so run the install again after
   every herdr update.
 - **Claude Code runs inside herdr.** Start herdr (run `herdr` in a terminal), then start Claude Code in
-  one of its panes. Every mcv command refuses to run from a plain terminal, `doctor` included.
+  one of its panes. Every `mcv-herdr.sh` command, `doctor` included, refuses to run from a plain
+  terminal, so `/mcv` does too.
 - `jq` 1.5 or newer, `git` 2.17 or newer, and bash 3.2 or newer. Written on macOS (stock bash
   3.2); the tests also pass on Ubuntu 24.04, and the main commands were checked with jq 1.5 and
   git 2.17. Running the tests needs git 2.28 or newer. herdr itself is tested only on macOS here.
@@ -55,12 +56,18 @@ This repository is its own marketplace. While it is private, the machine needs g
 
 In a Claude Code session started inside a herdr pane, in your project's folder, type `/mcv` (the
 slash menu shows it as `/mcv:mcv`). The first time, the coordinator checks herdr, proposes a project
-config, and writes `.claude/mcv.json` once you agree:
+config, and writes `.claude/mcv.json` once you agree. The examples in this README follow one
+made-up project, Brewly, a coffee shop's ordering system: a folder `~/code/brewly` with its own
+`CLAUDE.md` and `plans/`, holding three repositories, `web` (the customer ordering site), `api`
+(orders and menu) and `staff` (the baristas' order queue). Started in `~/code/brewly`, the
+coordinator proposes:
 
 ```json
-{ "project":  "acme",
-  "repos":    { "admin": "admin", "storefront": "storefront" },
-  "dispatch": "{task}" }
+{ "project":  "brewly",
+  "repos":    { "web": "web", "api": "api", "staff": "staff" },
+  "dispatch": "{task}",
+  "base":     "origin/develop",
+  "context":  "." }
 ```
 
 `project` is a short name that prefixes every worker; `repos` are the repositories workers may be
@@ -74,62 +81,81 @@ Optional fields:
   repositories. See [What a worker has](#what-a-worker-has).
 - `max_workers` (default 2): how many workers run at once; the coordinator queues the rest.
 
-Then ask for work in plain words ("fix the login redirect in admin, and add a CSV export"). Before
-starting anything, the coordinator shows each worker it plans, with its task id, repo and branch, and
-waits for your yes. Questions arrive labelled by task, for example `login-fix #1`; answer in plain
-words. The coordinator never answers a worker's question or approves a worker's dialog for you.
+Then ask for work in plain words ("the cart total in web ignores the oat-milk surcharge, fix it; and
+add a CSV export of loyalty points to api"). Before starting anything, the coordinator shows each
+worker it plans, with its task id, repo and branch, and waits for your yes. Questions arrive
+labelled by task, for example `cart-fix #1`; answer in plain words. The coordinator never answers a worker's question or approves a worker's dialog for you.
 
 ## Run the helper by hand
 
 Everything the coordinator does goes through `bin/mcv-herdr.sh`, which you can also run yourself.
-It is not on your `PATH`. Find it once:
+It is not on your `PATH`. Find the installed copy once:
 
 ```
-find ~/.claude/plugins -name mcv-herdr.sh
+find ~/.claude/plugins/cache/mcv -name mcv-herdr.sh
 ```
 
-and call it by that full path, either by asking Claude to run it or by typing it after `!` in Claude
-Code. Below, `H` stands for that path.
+There is one folder per installed version (`.../mcv/mcv/<version>/bin/`); use the newest. Do not
+use the copy under `~/.claude/plugins/marketplaces/`: that is the marketplace's checkout, not the
+plugin Claude Code runs. Call it by its full path, either by asking Claude to run it or by typing it
+after `!` in Claude Code. Below, `H` stands for that path.
 
 ```
 H doctor                                     # herdr, its server, the integration, jq
-H spawn shop t1 ~/code/shop fix/login        # new worktree on new branch fix/login, idle Claude in it
-H prompt shop/t1 "Fix the login redirect bug"
-H read shop/t1                               # what the worker said
-H remove shop/t1                             # close it; the branch is kept
+H spawn brewly cart-fix ~/code/brewly/web fix/cart-total
+                                             # new worktree on new branch fix/cart-total, idle Claude in it
+H prompt brewly/cart-fix "The cart total ignores the oat-milk surcharge; fix it"
+H read brewly/cart-fix                       # what the worker said
+H agents                                     # every herdr agent and its state
+H remove brewly/cart-fix                     # close it; the branch is kept
 ```
 
 Run `H` with no arguments for every command and option.
 
-- `shop` is a **project** name and `t1` a **task id**; you choose both. Use lowercase letters, digits,
+- `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.
-- `spawn` needs a branch name that does not exist yet, locally or on a remote; `main`, `master` and
-  `develop` are always refused. It fetches first, then starts the branch from the remote's default
-  branch (for example `origin/main`), or from `--base <ref>` if you give one, so a worker never starts
-  from a stale or unrelated checkout. A repository with no remote starts from its current HEAD; a
-  `--base` that names a local branch is used as it is. If the remote's default branch cannot be found
-  (for example offline), `spawn` stops and asks for `--base` rather than branch from a stale HEAD. The
+- `spawn` needs a branch name that does not exist yet, locally, on a remote or as a tag; `main`,
+  `master`, `develop` and a remote's own name (`origin`) are always refused, and so is a name one
+  folder above or below an existing branch (`main/x`, or `feat` while `feat/x` exists). Names are
+  compared ignoring letter case. It fetches first, then
+  starts the branch from the default branch of `origin` (for example `origin/main`), or of the only
+  remote when none is called `origin`, or from `--base <ref>` if you give one, so a worker never
+  starts from a stale or unrelated checkout. A repository with no remote starts from its current
+  HEAD; a `--base` that names a local branch is used as it is. If the default branch cannot be found
+  (offline, several remotes and none called `origin`, nothing pushed yet), `spawn` stops and asks
+  for `--base` rather than branch from a stale HEAD. The
   new branch has no upstream, so a plain `git push` from the worker cannot reach the base branch; the
   worker sets one when it first pushes its own branch. Two spawns in the same repository run one
   after the other. `--context <folder>` and `.worktreeinclude`: see
   [What a worker has](#what-a-worker-has). The worktree goes under `~/.herdr/worktrees/`. If no herdr workspace is open for
   that repository yet, herdr also opens one for its main checkout.
 - If `spawn` fails while starting Claude, the task is left in place. The usual cause is Claude's
-  folder trust dialog, shown the first time Claude opens a folder; its default answer is "No, exit",
-  so pick "Yes" in the worker's herdr pane, and `prompt` then works. Otherwise run `remove` before
-  using the same id again.
+  folder trust dialog. Claude keeps that trust per repository, counting a worktree as its
+  repository's main checkout, so the dialog appears only until "Yes" has been picked once for the
+  repository: in a worker's pane, or by opening Claude in the repository itself. A trusted folder
+  above the repository does not count, so in Brewly each of `web`, `api` and `staff` asks once.
+  Its default answer is "No, exit": pick "Yes" in the worker's herdr pane, and `prompt` then works.
+  Otherwise run `remove` before using the same id again.
 - `prompt` waits until the worker stops, up to 10 minutes by default (`--timeout <ms>`). It prints only
   the worker's new state; `read` shows what the worker said. When Claude runs the helper for you, its
   Bash tool stops waiting after 2 minutes unless given a longer timeout, so for long work use
   `prompt --no-wait`, which returns as soon as the worker has started, and check back with `read`.
-- `remove` refuses while the worktree has uncommitted or untracked files, or when git cannot read it.
-  Files your `.gitignore` ignores (build output, dependencies, a local `.env`) are deleted with the
-  worktree. The branch stays as a local branch; push it first if you need it elsewhere. It also works after you have closed the worker's
-  herdr workspace yourself.
+- `remove` refuses while the worker is working or waiting at a dialog, and while the worktree has
+  uncommitted or untracked files, or when git cannot read it. Files your `.gitignore` ignores
+  (build output, dependencies, a local `.env`) are deleted with the worktree. The branch stays as a
+  local branch; push it first if you need it elsewhere. It also works after you have closed the
+  worker's herdr workspace yourself. The workspace herdr opened for the repository's main checkout
+  stays open; close it in herdr when you no longer need it.
+- `prompt` refuses a worker that has not received mcv's rules (below), since it would never
+  report its questions. Usually it is still at the folder trust dialog: pick "Yes" there and
+  prompt again. Otherwise its Claude did not load the mcv plugin, which happens when mcv is
+  installed for one project only, or when you run the helper from a clone (pass
+  `-- --plugin-dir <that clone>` to `spawn`); `remove` the worker and spawn it again.
 - `read` shows the worker's screen even after Claude has exited there; `prompt` then says the worker
   is no longer running Claude.
 - Task state is kept outside every repository, in `~/.claude/mcv/<project>/tasks/<id>/`; set
-  `MCV_HOME` to keep it elsewhere (`spawn` passes it on to each worker).
+  `MCV_HOME` to keep it elsewhere (`spawn` passes it on to each worker; a relative path is taken
+  from the folder you run the helper in).
 
 Worker states, as herdr reports them:
 
@@ -154,11 +180,12 @@ committed on its base branch and nothing else.
 | Files git ignores (`.env`, `qa/.env`, the repo's own `CLAUDE.local.md`) | only those listed in the repo's `.worktreeinclude` (below) |
 | `node_modules` and other installed dependencies | no: the worker installs them (`npm ci` and the like) |
 | The project folder around the repo: its `CLAUDE.md`, `CLAUDE.local.md`, skills, plans | only with `context` in the config (below) |
-| A path that leaves the repo, such as `../other-repo` | no: from a worktree it points elsewhere; the coordinator gives such paths in full in the task |
+| A path that leaves the repo, such as `../api/openapi.yaml` written in `web`'s notes | no: from a worktree it points elsewhere; the coordinator gives such paths in full in the task |
 | `.claude/settings.local.json` (permissions you allowed locally) | only if listed in `.worktreeinclude` |
 
 **`.worktreeinclude`.** A file at the repo's root, in `.gitignore` syntax, naming ignored files to
-copy into every new worktree from the main checkout, for example:
+copy into every new worktree from the main checkout. Brewly's `web` keeps a test customer's login
+for its browser checks in an ignored `qa/.env`, so its `.worktreeinclude` reads:
 
 ```
 qa/.env
@@ -174,7 +201,8 @@ Code reads for its own worktrees, so one list serves both. It is for a few small
 
 **`context`.** When `.claude/mcv.json` sits in a folder that holds several repositories, a worker
 in one of them loses that folder's `CLAUDE.md`, `CLAUDE.local.md` and skills, because its worktree
-lives elsewhere. With `"context": "."` the worker is started with that folder added (Claude's
+lives elsewhere: a worker in `brewly/web` would not see `brewly/CLAUDE.md` or `brewly/plans/`.
+With `"context": "."` the worker is started with that folder added (Claude's
 `--add-dir`, with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`), so it reads them as a session
 opened in the repo's own folder would. `--add-dir` would also let it edit there, so the worker's
 settings deny Claude's file-editing tools anywhere in that folder (checked: an edit there is
@@ -194,7 +222,7 @@ watching them.
 To make a worker ask before acting, pass Claude's own flag after `--`:
 
 ```
-H spawn shop t1 ~/code/shop fix/login -- --permission-mode default
+H spawn brewly cart-fix ~/code/brewly/web fix/cart-total -- --permission-mode default
 ```
 
 In 0.1.0 such a worker stops in the `blocked` state at each approval dialog, and the helper cannot

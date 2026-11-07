@@ -6,8 +6,9 @@
 ## Context
 
 The coordinator is started inside one project ([ADR 0002](0002-coordinator-is-a-skill.md)). Some
-days a user works across several at once, for example two single-repository projects and a
-project folder holding three app repositories, and would rather follow all their workers from one
+days a user works across several at once, for example the Brewly project folder from the README
+(three repositories under `~/code/brewly`) and a single-repository project such as
+`~/code/menu-board`, the café's in-store menu screen, and would rather follow all their workers from one
 session than from one session per project.
 
 The code already allows it: `spawn` takes any repository path, and `--base` and `--context` per
@@ -23,11 +24,10 @@ anywhere, each with its own settings when it needs them:
 ```json
 { "project": "hub",
   "repos": {
-    "web":    "/abs/path/to/web",
-    "orders": { "path": "/abs/path/to/workspace/orders",
-                "context": "/abs/path/to/workspace",
-                "base": "origin/develop" } },
-  "base": "origin/develop",
+    "menu-board": "/Users/me/code/menu-board",
+    "web":        { "path": "/Users/me/code/brewly/web",
+                    "context": "/Users/me/code/brewly",
+                    "base": "origin/develop" } },
   "max_workers": 3 }
 ```
 

@@ -75,7 +75,10 @@ Skip this skill for:
    `.env`, say), tell the user they can list them in a `.worktreeinclude` file at that repo's root
    (`.gitignore` syntax); `spawn` copies them into each worktree.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
-   tool: `BIN/mcv-watch <project>`. Never start a second one for the same project.
+   tool: `BIN/mcv-watch <project>`. Never start a second one for the same project. If it exits at
+   once saying a watcher is already running, check your Monitor tasks: if that one is yours, keep
+   using it; if not, another session is watching this project, so tell the user, with the pid the
+   message gives, and let them choose to stop it (`kill <pid>`) or work from that session.
 
 ## Apply
 
@@ -84,10 +87,11 @@ Skip this skill for:
 1. **Pick the repo.** If the user named it, use it. Otherwise infer it from the task (a file path,
    an app name, an issue that names the app). If it is still unclear, ask in one line, with your
    best guess first.
-2. **Name the task.** Pick a short id from the work itself (`login-fix`, `export-csv`): lowercase,
+2. **Name the task.** Pick a short id from the work itself (`cart-fix`, `loyalty-csv`): lowercase,
    digits and `-`, unique in this project, and short enough that `<project>-<id>` is at most 32
    characters. Pick a new branch name following the project's own convention if its CLAUDE.md or
-   CONTRIBUTING has one, else `fix/<id>` for a fix and `feat/<id>` for anything else.
+   CONTRIBUTING has one, else `fix/<what>` for a fix and `feat/<what>` for anything else
+   (`fix/cart-total`, `feat/loyalty-csv`).
 3. **Write the task so the worker can do it without you.** The worker sees its own repo, plus the
    `context` folder if the config has one, and nothing of this conversation. Put in the task text
    the facts it needs that it cannot find there: a decision the user made, an endpoint and its
@@ -103,9 +107,9 @@ Skip this skill for:
 
    ```
    Starting 2 workers, 1 waiting:
-     login-fix    -> admin, branch fix/login        task: fix the redirect after login
-     export-csv   -> admin, branch feat/export-csv  task: add a CSV export button
-     order-pdf    -> admin, branch feat/order-pdf   (waits for one of the above)
+     cart-fix     -> web, branch fix/cart-total     task: add the oat-milk surcharge to the cart total
+     loyalty-csv  -> api, branch feat/loyalty-csv   task: export loyalty points as CSV
+     receipt-pdf  -> api, branch feat/receipt-pdf   (waits for one of the above)
    OK? (names can be changed)
    ```
 5. **Start each worker.** `BIN/mcv-herdr.sh spawn <project> <id> <repo path> <branch>`, adding
@@ -116,11 +120,14 @@ Skip this skill for:
    `.worktreeinclude`. If it fails, tell the user its one-line reason. If Claude failed to start, `BIN/mcv-herdr.sh read
    <project>/<id>` shows the screen: describe it. Usually it is Claude's folder trust dialog, whose
    default answer is "No, exit": ask the user to pick "Yes" in the worker's herdr pane, then go on
-   with step 6. If the user does not want it, offer `remove`.
+   with step 6. It comes once per repository; later workers there start without it. If the user does not want it, offer `remove`.
 6. **Send the task.** `BIN/mcv-herdr.sh prompt <project>/<id> "<dispatch, with {task} replaced>"
    --no-wait`. It returns within seconds with the state `working` (or `blocked` if the worker hit a
    dialog at once). Never call `prompt` without `--no-wait`: Claude Code's Bash tool stops waiting
-   after 2 minutes.
+   after 2 minutes. If it refuses because the worker has no mcv worker rules yet, `read` its
+   screen. At Claude's folder trust question, ask the user to pick "Yes" in its pane, then send
+   again. Otherwise the mcv plugin is not loaded in that worker: tell the user, offer `remove`,
+   and start no more workers until it is fixed; every worker would have the same problem.
 7. Tell the user the workers are running, and carry on with the conversation. The watcher wakes you.
 
 The worker's own rules (how to ask, git rules, staying in its worktree) reach it through mcv's
@@ -130,7 +137,8 @@ hooks. Do not repeat them in the task text.
 
 Each line from the watcher is one event, tab-separated: time, `<project>/<id>`, then the event.
 When the watcher starts (a new session, or after it was restarted) it first shows every question
-still without an answered line, so nothing asked earlier is lost. A question whose `<id> #<n>` you
+still without an answered or pending line, so nothing asked earlier is lost; an answer still
+pending comes as `deliver` once the worker has stopped. A question whose `<id> #<n>` you
 already relayed in this conversation is the same question: do not ask the user twice.
 
 | Event | What to do |
@@ -142,6 +150,7 @@ already relayed in this conversation is the same question: do not ask the user t
 | `done - <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
 | `failed - <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
 | `note - <text>` | Mention it in one line. |
+| `deliver qN <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 4 below). Send it as in step 2 of "Sending an answer", with this exact answer; do not ask the user again. |
 | `gone -` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. Start the next waiting worker, if any. |
 
 If `prompt` says a worker is not running Claude any more, handle it like `gone -`: `read` its screen
@@ -151,9 +160,9 @@ for what it said last, tell the user, and offer `remove`.
 workers in the same repo never look alike. Keep the worker's recommendation if it gave one.
 
 ```
-login-fix #1 (admin, fix/login)
-  Keep the redirect URL in the session or the query string?
-  Recommended: session, since the client can edit the query string.
+cart-fix #1 (web, fix/cart-total)
+  Add the surcharge per drink, or once per order?
+  Recommended: per drink, since that is how the till prints it on the receipt.
 ```
 
 In this version every question goes to the user. Do not answer one yourself, even when you think
@@ -169,7 +178,11 @@ you know.
 3. If the worker has moved on (the user answered in its pane), send nothing and record
    `BIN/mcv-status --task <project>/<id> answered q<n> "answered by the user in the worker's pane"`.
 4. If `prompt` refuses because the worker is busy, it did not end its turn after asking. Do not
-   retry in a loop; wait for its next event.
+   retry in a loop, and do not just wait: no event would come, since the question already woke
+   you. Keep the answer: `BIN/mcv-status --task <project>/<id> pending q<n> "<answer>"`. The
+   watcher prints `deliver q<n> <answer>` as soon as the worker stops (at once if it already
+   has); then send it and record `answered`. Tell the user the answer goes in when the worker
+   stops.
 
 ### When the user asks where things stand
 
@@ -192,8 +205,8 @@ Report per worker: id, repo and branch, state, open questions.
 
 - A worker: `BIN/mcv-herdr.sh remove <project>/<id>`, only when the user agrees. It closes the
   worker, deletes its worktree folder and task state, and keeps the branch as a local branch. It
-  refuses while the worktree has uncommitted or untracked files; then tell the user, whose call it
-  is.
+  refuses while the worker is working or at a dialog, and while the worktree has uncommitted or
+  untracked files; then tell the user, whose call it is.
 - The config: delete `.claude/mcv.json`.
 
 ## Operating rules

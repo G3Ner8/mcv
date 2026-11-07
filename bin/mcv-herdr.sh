@@ -15,14 +15,19 @@
 #       Check that herdr, its server, its Claude integration and jq are ready.
 #   spawn <project> <id> <repo-path> <new-branch> [--base <ref>] [--context <folder>] [-- <claude-args>...]
 #       Fetch, then create a git worktree of <repo-path> on a branch that must
-#       not exist yet, locally or on a remote (main, master and develop are
-#       always refused), starting from <ref> (default: the remote's default
-#       branch, e.g. origin/main; a repository with no remote uses its current
-#       HEAD). The new branch has no upstream until the worker pushes it. One
+#       not exist yet, locally, on a remote or as a tag, in any letter case
+#       (main, master, develop and a remote's own name are always refused,
+#       and so is a name that would be a folder of another branch or hold
+#       one, such as main/x), starting from <ref> (default: the default branch of
+#       origin, or of the only remote when none is called origin, e.g.
+#       origin/main; a repository with no remote uses its current HEAD;
+#       several remotes and no origin need --base). A bare repository is
+#       refused. The new branch has no upstream until the worker pushes it. One
 #       spawn runs at a time per repository; a second one waits for the
 #       first. herdr chooses the folder, under ~/.herdr/worktrees/. Then start
 #       an idle Claude in it with MCV_TASK=<project>/<id> set. Send it work with `prompt`. Arguments after
-#       `--` go to claude, e.g. -- --permission-mode default. If Claude fails to
+#       `--` go to claude, e.g. -- --permission-mode default; mcv's own
+#       --base and --context there are refused. If Claude fails to
 #       start (for example at the folder trust dialog), the task is left in
 #       place: once the user lets Claude through in its pane, `prompt` works;
 #       otherwise run `remove` before reusing the id. <project>-<id> must not
@@ -34,11 +39,15 @@
 #       CLAUDE.md, CLAUDE.local.md and skills: use it for the project root
 #       when the repository is one of several inside it. Claude's file edits
 #       there are denied, and the worker is told it is read-only. Refused: a
-#       folder inside the repository, /, or one holding the worktree.
+#       folder inside the repository, /, one holding the worktree, and a path
+#       with [ ] * or ? (the deny rule is a pattern).
 #   prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]
 #       Send text and wait until the worker stops (default 10 minutes). Prints
 #       only the worker's new state; use `read` to see what it said. Refused
-#       unless the worker is idle or done. With --no-wait, return as soon as
+#       with no text (empty, or an option where the text goes), unless the
+#       worker is idle or done, and for a worker whose Claude did
+#       not load mcv's hooks (no rules-loaded marker from its SessionStart
+#       hook: the plugin is not loaded there). With --no-wait, return as soon as
 #       the worker has started (state working, or blocked at a dialog), within
 #       seconds. Without it, when run from Claude Code's Bash tool, give the
 #       tool a timeout longer than --timeout. Says so plainly when Claude has
@@ -53,9 +62,11 @@
 #       workers are named <project>-<id>; "-" when unnamed).
 #   remove <project>/<id>
 #       Close the worker, delete its worktree folder and the task's mcv state.
-#       Refused while the worktree has uncommitted or untracked files, or git
-#       cannot read it; ignored files are deleted with it. The branch is
-#       kept, as a local branch; push it first if you need it.
+#       Refused while the worker is working or at a dialog, and while the
+#       worktree has uncommitted or untracked files, or git cannot read it;
+#       ignored files are deleted with it. The branch is kept, as a local
+#       branch; push it first if you need it. The workspace herdr opened for
+#       the repository's main checkout stays open; close it in herdr.
 #       Also works after the user has closed the worker's herdr workspace.
 #
 # <project> and <id>: lowercase letters, digits, - and _; <project> starts with
@@ -64,7 +75,8 @@
 #
 # Output: one JSON object, except `read` and `agents`. Errors: one line on
 # stderr, "mcv-herdr: <command>: <reason>", exit 1. Unknown command: this text,
-# exit 2. Task state: ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/meta.
+# exit 2. Task state: ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/meta
+# (a relative MCV_HOME is taken from the current folder).
 
 # For maintainers: this is the only file in mcv that calls herdr. Every other
 # mcv file goes through it, so a change in herdr's CLI is fixed here alone.
@@ -73,6 +85,9 @@ set -euo pipefail
 
 MIN_HERDR="0.9.5"
 MCV_HOME="${MCV_HOME:-$HOME/.claude/mcv}"
+# spawn hands MCV_HOME to the worker, whose folder is its worktree: a
+# relative path would point somewhere else there.
+[[ "$MCV_HOME" == /* ]] || MCV_HOME="$PWD/$MCV_HOME"
 PROJECT_RE='^[a-z][a-z0-9_-]*$'
 ID_RE='^[a-z0-9][a-z0-9_-]*$'
 CMD="${1:-}"
@@ -160,7 +175,9 @@ task_dir() {
 # it is still held. The lock holds "<pid> <epoch seconds>". A lock whose pid
 # has exited without releasing it (a crash) is taken over, but only if it is
 # unchanged since it was read and at least 2 seconds old, so a lock another
-# process has just taken is never deleted.
+# process has just taken is never deleted. A lock with no pid at all was
+# left by a process killed between making it and writing the pid; it is
+# taken over once the folder is a minute old, far longer than that gap.
 take_lock() {
   local l="$1" seen pid at i=0
   mkdir -p "$(dirname "$l")"
@@ -170,6 +187,11 @@ take_lock() {
     if [[ "$pid" =~ ^[0-9]+$ && "$at" =~ ^[0-9]+$ ]] && (( $(date +%s) - at >= 2 )) \
       && ! kill -0 "$pid" 2>/dev/null \
       && [[ "$(cat "$l/pid" 2>/dev/null || true)" == "$seen" ]]; then
+      rm -rf "$l"
+      continue
+    fi
+    if [[ -z "$seen" && -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ]] \
+      && [[ ! -s "$l/pid" ]]; then
       rm -rf "$l"
       continue
     fi
@@ -264,9 +286,10 @@ copy_includes() {
     echo ".worktreeinclude names ${#files[@]} files, more than $MAX_INCLUDES; list only the few a worker needs (a dependency folder is installed, not copied)"
     return 1
   fi
+  local err
   for f in ${files[@]+"${files[@]}"}; do
-    { mkdir -p "$wt/$(dirname "$f")" && cp -p "$root/$f" "$wt/$f"; } 2>/dev/null \
-      || { echo "could not copy $f from .worktreeinclude into the worktree"; return 1; }
+    err="$( { mkdir -p "$wt/$(dirname "$f")" && cp -p "$root/$f" "$wt/$f"; } 2>&1 )" \
+      || { echo "could not copy $f from .worktreeinclude into the worktree: $(head -1 <<<"$err")"; return 1; }
   done
   echo "${#files[@]}"
 }
@@ -287,20 +310,49 @@ within() {
 }
 
 # Print the first ref of repository $1 that is branch $2 (given in lower
-# case) in any letter case, locally or on any remote, and succeed; fail when
-# there is none.
+# case) in any letter case, locally, on any remote, or as a tag (git would
+# find the name ambiguous), and succeed; fail when there is none.
 branch_taken() {
   local ref
   while IFS= read -r ref; do
     case "$ref" in
-      refs/heads/"$2") ;;
+      refs/heads/"$2"|refs/tags/"$2") ;;
       refs/remotes/*/"$2") [[ "${ref#refs/remotes/*/}" == "$2" ]] || continue ;;
       *) continue ;;
     esac
     printf '%s' "$ref"
     return 0
+  done < <(git -C "$1" for-each-ref --format='%(refname)' refs/heads refs/remotes refs/tags | tr '[:upper:]' '[:lower:]')
+  return 1
+}
+
+# Print the first branch of repository $1, local or on a remote, that branch
+# $2 (lower case) would sit inside or hold as a folder (main and main/x, or
+# feat and feat/taken), and succeed; fail when there is none. git cannot
+# keep both, here or on the remote once pushed.
+branch_clash() {
+  local ref name
+  while IFS= read -r ref; do
+    case "$ref" in
+      refs/heads/*) name="${ref#refs/heads/}" ;;
+      refs/remotes/*/*) name="${ref#refs/remotes/*/}" ;;
+      *) continue ;;
+    esac
+    if [[ "$2" == "$name"/* || "$name" == "$2"/* ]]; then
+      printf '%s' "$ref"
+      return 0
+    fi
   done < <(git -C "$1" for-each-ref --format='%(refname)' refs/heads refs/remotes | tr '[:upper:]' '[:lower:]')
   return 1
+}
+
+# The top folder of the checkout at $1. A bare repository has none, and
+# git's own refusal ("not a git repository") would send the user looking in
+# the wrong place.
+repo_root() {
+  [[ "$(git -C "$1" rev-parse --is-bare-repository 2>/dev/null)" != true ]] \
+    || die "$1 is a bare repository, with no files to work on; give a checkout of it"
+  git -C "$1" rev-parse --show-toplevel 2>/dev/null || die "not a git repository: $1"
 }
 
 # Remove a worktree herdr just created, and the task folder written for it,
@@ -365,9 +417,20 @@ cmd_spawn() {
         [[ -z "$context" ]] || die "--context given twice"
         context="$(CDPATH='' cd -- "$2" 2>/dev/null && pwd -P)" || die "--context: no such folder: $2"
         [[ "$context" != / ]] || die "--context / would open the whole disk; give the project folder"
+        # The deny rule is a path pattern: these characters would make it
+        # match something other than the folder.
+        case "$context" in
+          *[][*?]*) die "--context $context: a path with [ ] * or ? cannot be kept read-only for the worker; use a folder without them" ;;
+        esac
         shift 2 ;;
       --) shift; break ;;
       *) die "unknown option '$1'; Claude's own options go after --" ;;
+    esac
+  done
+  local a
+  for a in "$@"; do
+    case "$a" in
+      --base|--base=*|--context|--context=*) die "$a after --: mcv's options go before --, Claude's after" ;;
     esac
   done
   # The context is the folder around the repository. One inside it, or the
@@ -375,7 +438,7 @@ cmd_spawn() {
   # and inode (-ef), not by spelling: macOS file systems ignore case.
   if [[ -n "$context" ]]; then
     local repo_real
-    repo_real="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository: $repo"
+    repo_real="$(repo_root "$repo")" || exit 1
     within "$context" "$repo_real" \
       && die "--context $context is inside the repository; give the folder around it"
   fi
@@ -404,7 +467,7 @@ cmd_spawn() {
   trap 'exit 143' TERM
   trap 'exit 129' HUP
   take_lock "$MCV_HOME/.claims/$name" 0 \
-    || die "another spawn of worker '$name' is running"
+    || die "another spawn of worker '$name' is running; if none is, delete $MCV_HOME/.claims/$name"
   CLAIM="$MCV_HOME/.claims/$name"
 
   local dir="$MCV_HOME/$project/tasks/$id"
@@ -423,7 +486,7 @@ cmd_spawn() {
   fi
 
   local root
-  root="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository: $repo"
+  root="$(repo_root "$repo")" || exit 1
 
   # herdr reuses an existing branch without complaint, even main, so a worker
   # could end up committing to it. Only a branch that exists nowhere, locally
@@ -434,29 +497,46 @@ cmd_spawn() {
   lc="$(lower "$branch")"
   case "$lc" in
     main|master|develop) die "'$branch' is a shared branch; give the worker a new branch name" ;;
-    refs/*|head|head/*) die "'$branch' is not a usable branch name; give a plain name such as fix/login" ;;
+    refs/*|head|head/*) die "'$branch' is not a usable branch name; give a plain name such as fix/cart-total" ;;
   esac
   for r in $(git -C "$root" remote); do
+    [[ "$lc" != "$(lower "$r")" ]] \
+      || die "'$branch' is the name of the remote $r, which git would confuse with it; give a plain name such as fix/cart-total"
     [[ "$lc" != "$(lower "$r")"/* ]] \
-      || die "'$branch' starts with the remote name $r; give a plain name such as fix/login"
+      || die "'$branch' starts with the remote name $r; give a plain name such as fix/cart-total"
   done
   r="$(branch_taken "$root" "$lc")" \
     && die "branch '$branch' already exists as ${r#refs/} in $root; give the worker a new branch name"
+  r="$(branch_clash "$root" "$lc")" \
+    && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
 
   lock_repo "$root"
   NEW_ROOT="$root"
 
   # Start from the latest remote state, as a person would pull before
-  # branching: fetch, then branch from --base, or from the remote's default
-  # branch. A repository with no remote branches from its current HEAD. A
-  # --base that is not on a remote (a local branch) is used as it is.
+  # branching: fetch, then branch from --base, or from the default branch of
+  # origin, or of the only remote when none is called origin. A repository
+  # with no remote branches from its current HEAD. A --base that is not on a
+  # remote (a local branch) is used as it is.
   local remote r
-  if [[ -z "$base" ]] && git -C "$root" remote get-url origin >/dev/null 2>&1; then
-    git -C "$root" remote set-head origin --auto >/dev/null 2>&1 || true
-    base="$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-    # Falling back to the local HEAD here would start a stale branch quietly.
-    [[ -n "$base" ]] \
-      || die "cannot tell origin's default branch in $root (offline?); pass --base <ref>"
+  if [[ -z "$base" ]]; then
+    local -a remotes=()
+    while IFS= read -r r; do [[ -z "$r" ]] || remotes+=("$r"); done < <(git -C "$root" remote)
+    remote=""
+    if git -C "$root" remote get-url origin >/dev/null 2>&1; then
+      remote=origin
+    elif (( ${#remotes[@]} == 1 )); then
+      remote="${remotes[0]}"
+    elif (( ${#remotes[@]} > 1 )); then
+      die "$root has several remotes and none is called origin; pass --base <remote>/<branch>"
+    fi
+    if [[ -n "$remote" ]]; then
+      git -C "$root" remote set-head "$remote" --auto >/dev/null 2>&1 || true
+      base="$(git -C "$root" symbolic-ref --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)"
+      # Falling back to the local HEAD here would start a stale branch quietly.
+      [[ -n "$base" ]] \
+        || die "cannot tell $remote's default branch in $root (offline, or nothing pushed there yet?); pass --base <ref>"
+    fi
   fi
   if [[ -n "$base" ]]; then
     remote="${base%%/*}"
@@ -468,6 +548,8 @@ cmd_spawn() {
   fi
   r="$(branch_taken "$root" "$lc")" \
     && die "branch '$branch' already exists as ${r#refs/} in $root; give the worker a new branch name"
+  r="$(branch_clash "$root" "$lc")" \
+    && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
 
   # From here on, a branch named $branch was made by this spawn.
   NEW_BRANCH="$branch"
@@ -552,10 +634,12 @@ cmd_spawn() {
   NEW_DIR=""
   NEW_BRANCH=""
 
-  # MCV_TASK goes in through Claude's own settings, not the pane's shell, so
-  # nothing is typed into the shell before Claude starts. MCV_HOME goes with
-  # it: the worker's environment comes from herdr, not from this session, and
-  # its status log must land where this session's watcher looks.
+  # MCV_TASK goes in through Claude's own settings, not an export typed into
+  # the pane's shell first. herdr still types the whole claude command line
+  # at the pane's shell prompt, so it lands in that shell's history; it holds
+  # only the task name and paths, never a secret. MCV_HOME goes with it: the
+  # worker's environment comes from herdr, not from this session, and its
+  # status log must land where this session's watcher looks.
   #
   # With --context, the worker also sees that folder (the project root, when
   # the repository is one of several in it): --add-dir opens it, and the env
@@ -584,6 +668,12 @@ cmd_prompt() {
   [[ $# -ge 2 ]] || die "usage: prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]"
   local task="$1" text="$2" timeout=600000 nowait=""
   shift 2
+  # A forgotten text would otherwise send an option word, or nothing, and
+  # then wait up to ten minutes for the reply.
+  case "$text" in
+    --no-wait|--timeout) die "the text is missing ('$text' is an option); usage: prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]" ;;
+  esac
+  [[ "$text" =~ [^[:space:]] ]] || die "no text to send; usage: prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --no-wait) nowait=1; shift ;;
@@ -611,6 +701,13 @@ cmd_prompt() {
   [[ -n "$status" ]] || die "herdr agent get gave unexpected output"
   [[ "$status" == idle || "$status" == "done" ]] \
     || die "worker $task is $status; prompt is only sent to a worker that has stopped (idle or done)"
+  # mcv's SessionStart hook leaves this marker. Without it the worker's
+  # Claude did not load the mcv plugin, so it has no git rules, may use
+  # AskUserQuestion and never writes the status log: give it no work.
+  # herdr reports a worker still at Claude's folder trust question as idle,
+  # and Claude runs the hook only once past it, so that is checked first.
+  [[ -f "$d/rules-loaded" ]] \
+    || die "worker $task has no mcv worker rules yet: if its pane shows Claude's folder trust question, pick Yes there and prompt again; otherwise the mcv plugin is not loaded in its Claude session (install it for your user, or spawn with -- --plugin-dir <mcv folder>), so remove it and spawn again"
 
   # Return as soon as the worker has started (or stopped at a dialog); herdr
   # fails the call if neither happens within 15 seconds.
@@ -661,6 +758,19 @@ cmd_remove() {
   branch="$(jfield "$m" .branch)"
   repo="$(jfield "$m" .repo)"
   [[ -n "$wt" && -n "$ws" && -n "$repo" ]] || die "task $1 has a damaged meta file ($dir/meta)"
+  # A working worker's tree can be clean for a moment; removing it then
+  # would kill the work in progress. A worker herdr no longer knows is fine.
+  local name status
+  name="$(jfield "$m" .agent)"
+  if [[ -n "$name" ]]; then
+    if h_try agent get "$name"; then
+      status="$(jfield "$HOUT" .result.agent.agent_status)"
+      [[ "$status" != working && "$status" != blocked ]] \
+        || die "worker $1 is $status; let it stop (or stop it in its herdr pane), then remove it"
+    elif [[ "$HERR_CODE" != agent_not_found ]]; then
+      die "herdr agent get: $HERR_MSG"
+    fi
+  fi
   # Unsure counts as dirty: a worktree git cannot read is not deleted.
   if [[ -d "$wt" ]]; then
     local st
