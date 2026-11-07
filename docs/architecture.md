@@ -168,4 +168,5 @@ with every herdr window closed.
 
 ## Next
 
-- A coordinator over several projects at once: [ADR 0005](adr/0005-hub-coordinator.md) (proposed).
+- A coordinator over several projects at once: [ADR 0005](adr/0005-hub-coordinator.md). Its
+  per-repository config is built; the hub itself is still proposed.

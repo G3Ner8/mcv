@@ -1,6 +1,7 @@
 # 0005. A coordinator over several projects
 
-- Status: Proposed (revisit after the first full run on a real project)
+- Status: Partly accepted. The per-repository config is built; the hub is still proposed
+  (revisit after the first full run on a real project)
 - Date: 2026-11-07
 
 ## Context
@@ -46,4 +47,9 @@ change; the scripts already take these per call.
 
 ## Decision
 
-None yet. Decide after the first full run, if the user wants the hub.
+Built now: the per-repository config, an object entry with `path` and its own `base` or `context`
+(`""` for none), and absolute paths. It serves a single project too, where repositories branch
+from different bases or one needs no context, which one value per config could not.
+
+Not built: the hub itself. Its cost is the missing project context above, and whether a user
+wants it can only be judged after the first full run. Decide then.

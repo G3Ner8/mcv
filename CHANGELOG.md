@@ -58,7 +58,8 @@ merge request, is still to do.
   directions to `mcv-status needs-decision`. Both do nothing unless `MCV_TASK` names a task mcv
   started.
 - `skills/mcv/SKILL.md`: the `/mcv` skill the coordinator follows. Builds `.claude/mcv.json` with the
-  user (proposing `base` and `context` where they matter), confirms every worker before starting
+  user (proposing `base` and `context` where they matter, at the top level or per repository
+  with an object entry that wins over them), confirms every worker before starting
   it, keeps at most `max_workers` active, labels questions `<task id> #<n>`, writes into each task
   the facts the worker cannot find itself, reads the worker's screen before sending an answer, and
   never answers a question or approves a dialog for the user.
