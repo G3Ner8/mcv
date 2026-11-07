@@ -46,7 +46,8 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    3. Lock the repository (`$MCV_HOME/.locks/<repo key>`), fetch, resolve the base.
    4. `herdr worktree create`; write meta at once, with a `starting` marker.
    5. Check the worktree is not the main checkout; clear the branch's upstream; release the lock.
-   6. Copy `.worktreeinclude` files; rewrite meta with the count.
+   6. Refuse a context that holds the worktree; copy `.worktreeinclude` files; rewrite meta with
+      the count.
    7. `herdr agent start` with `--add-dir <context>` (if any) and `--settings` carrying `MCV_TASK`,
       `MCV_HOME`, and for a context `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` and a deny rule
       for edits there. Remove `starting`.

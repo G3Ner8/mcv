@@ -51,8 +51,11 @@ badly, and the runner is kept light on purpose.
 - **shellcheck clean.** A `# shellcheck disable=` line needs a comment saying why.
 - **All herdr calls in `bin/mcv-herdr.sh`.** Every other file goes through it, so a change in herdr's
   CLI is fixed in one place.
-- **Errors are one line** on stderr, `mcv-herdr: <command>: <reason>`, exit 1; usage errors exit 2.
-  No raw shell or jq error reaches the caller.
+- **Errors are one line** on stderr, `mcv-herdr: <command>: <reason>`, exit 1. No raw shell or jq
+  error reaches the caller. Exit 2 means the caller asked for something the script does not have:
+  an unknown command in `mcv-herdr.sh` (which then prints its usage text), and an unknown kind or
+  a worker kind without `MCV_TASK` in `mcv-status`. Wrong arguments to a known `mcv-herdr.sh`
+  command are an error like any other: one line, exit 1.
 - **Hooks stay opt-in.** A plugin hook runs in every session where mcv is installed. It must exit 0
   with no output unless `MCV_TASK` names a task mcv started; `tests/test-hooks.sh` checks this.
 - **Comments are plain prose** and say why, not what. No markers or emoji in code comments.

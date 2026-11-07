@@ -36,7 +36,8 @@ run (use Claude Code subagents inside one session).
   must show `claude: current`. Updating herdr does not refresh it, so run the install again after
   every herdr update.
 - **Claude Code runs inside herdr.** Start herdr (run `herdr` in a terminal), then start Claude Code in
-  one of its panes. Every mcv command refuses to run from a plain terminal, `doctor` included.
+  one of its panes. Every `mcv-herdr.sh` command, `doctor` included, refuses to run from a plain
+  terminal, so `/mcv` does too.
 - `jq` 1.5 or newer, `git` 2.17 or newer, and bash 3.2 or newer. Written on macOS (stock bash
   3.2); the tests also pass on Ubuntu 24.04, and the main commands were checked with jq 1.5 and
   git 2.17. Running the tests needs git 2.28 or newer. herdr itself is tested only on macOS here.
@@ -82,20 +83,23 @@ words. The coordinator never answers a worker's question or approves a worker's 
 ## Run the helper by hand
 
 Everything the coordinator does goes through `bin/mcv-herdr.sh`, which you can also run yourself.
-It is not on your `PATH`. Find it once:
+It is not on your `PATH`. Find the installed copy once:
 
 ```
-find ~/.claude/plugins -name mcv-herdr.sh
+find ~/.claude/plugins/cache/mcv -name mcv-herdr.sh
 ```
 
-and call it by that full path, either by asking Claude to run it or by typing it after `!` in Claude
-Code. Below, `H` stands for that path.
+There is one folder per installed version (`.../mcv/mcv/<version>/bin/`); use the newest. Do not
+use the copy under `~/.claude/plugins/marketplaces/`: that is the marketplace's checkout, not the
+plugin Claude Code runs. Call it by its full path, either by asking Claude to run it or by typing it
+after `!` in Claude Code. Below, `H` stands for that path.
 
 ```
 H doctor                                     # herdr, its server, the integration, jq
 H spawn shop t1 ~/code/shop fix/login        # new worktree on new branch fix/login, idle Claude in it
 H prompt shop/t1 "Fix the login redirect bug"
 H read shop/t1                               # what the worker said
+H agents                                     # every herdr agent and its state
 H remove shop/t1                             # close it; the branch is kept
 ```
 
