@@ -98,10 +98,18 @@ clean() {
   text="${text//$'\n'/ }"
   text="${text//$'\t'/ }"
   # Other control characters (a terminal escape, say) would reach the
-  # coordinator's screen as they are. Escape sequences go whole first (CSI
-  # such as a colour, and OSC such as a window title), or "[31m" would stay.
+  # coordinator's screen as they are. Escape sequences go whole first, or
+  # "[31m" would stay: CSI such as a colour (parameters may start with a
+  # private prefix like > or ?), the same with the C1 introducer U+009B, OSC
+  # such as a window title, then any other ESC sequence such as the charset
+  # designation ESC ( B. U+009B is matched as its two UTF-8 bytes, never as a
+  # lone 9B byte, which also ends ordinary characters such as Thai U+0E1B.
   text="$(printf '%s' "$text" \
-    | LC_ALL=C sed -E -e $'s/\e\\[[0-9;?]*[ -/]*[@-~]//g' -e $'s/\e\\][^\a\e]*(\a|\e\\\\)//g' \
+    | LC_ALL=C sed -E \
+      -e $'s/\e\\[[0-?]*[ -/]*[@-~]//g' \
+      -e $'s/\xc2\x9b[0-?]*[ -/]*[@-~]//g' -e $'s/\xc2\x9b//g' \
+      -e $'s/\e\\][^\a\e]*(\a|\e\\\\)//g' \
+      -e $'s/\e[ -/]*[0-~]//g' \
     | LC_ALL=C tr -d '\000-\010\013-\037\177')"
   printf '%s' "$text"
 }
