@@ -128,9 +128,12 @@ Run `H` with no arguments for every command and option.
   [What a worker has](#what-a-worker-has). The worktree goes under `~/.herdr/worktrees/`. If no herdr workspace is open for
   that repository yet, herdr also opens one for its main checkout.
 - If `spawn` fails while starting Claude, the task is left in place. The usual cause is Claude's
-  folder trust dialog, shown the first time Claude opens a folder. Every worktree is a new folder,
-  so expect it at every spawn. Its default answer is "No, exit": pick "Yes" in the worker's herdr
-  pane, and `prompt` then works. Otherwise run `remove` before using the same id again.
+  folder trust dialog. Claude keeps that trust per repository, counting a worktree as its
+  repository's main checkout, so the dialog appears only until "Yes" has been picked once for the
+  repository: in a worker's pane, or by opening Claude in the repository itself. A trusted folder
+  above the repository does not count, so in Brewly each of `web`, `api` and `staff` asks once.
+  Its default answer is "No, exit": pick "Yes" in the worker's herdr pane, and `prompt` then works.
+  Otherwise run `remove` before using the same id again.
 - `prompt` waits until the worker stops, up to 10 minutes by default (`--timeout <ms>`). It prints only
   the worker's new state; `read` shows what the worker said. When Claude runs the helper for you, its
   Bash tool stops waiting after 2 minutes unless given a longer timeout, so for long work use

@@ -120,7 +120,7 @@ Skip this skill for:
    `.worktreeinclude`. If it fails, tell the user its one-line reason. If Claude failed to start, `BIN/mcv-herdr.sh read
    <project>/<id>` shows the screen: describe it. Usually it is Claude's folder trust dialog, whose
    default answer is "No, exit": ask the user to pick "Yes" in the worker's herdr pane, then go on
-   with step 6. If the user does not want it, offer `remove`.
+   with step 6. It comes once per repository; later workers there start without it. If the user does not want it, offer `remove`.
 6. **Send the task.** `BIN/mcv-herdr.sh prompt <project>/<id> "<dispatch, with {task} replaced>"
    --no-wait`. It returns within seconds with the state `working` (or `blocked` if the worker hit a
    dialog at once). Never call `prompt` without `--no-wait`: Claude Code's Bash tool stops waiting
