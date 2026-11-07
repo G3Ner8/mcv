@@ -5,18 +5,24 @@ on:
     branches: [main]
   pull_request:
 
-# Kept small on purpose: lint, JSON, and the hook-guard test, which matters
-# most because a plugin hook runs in every session where mcv is installed.
-# The full suite starts many processes and measures time, so it runs locally
-# (make check); see CONTRIBUTING.md.
+# Kept small on purpose: lint, JSON, the version check, and the hook-guard
+# test, which matters most because a plugin hook runs in every session where
+# mcv is installed. The full suite starts many processes and measures time,
+# so it runs locally (make check); see CONTRIBUTING.md.
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version check compares with the base branch's history.
+          fetch-depth: 0
       - name: Lint
         run: make lint
       - name: JSON and versions
         run: make json
+      - name: Version raised when shipped files change
+        if: github.event_name == 'pull_request'
+        run: make version-check BASE=origin/${{ github.base_ref }}
       - name: Hook-guard test
         run: make test-hooks

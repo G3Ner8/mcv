@@ -4,7 +4,23 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - Unreleased
+## [0.1.1] - 2026-11-07
+
+### Added
+
+- The coordinator offers to ignore `.claude/mcv.json` on this machine (`.git/info/exclude`, or
+  the global git ignore file) when git does not ignore it; it never edits the project's
+  `.gitignore`.
+- README: a short "What mcv writes" section.
+- CI fails a pull request that changes `bin/`, `skills/`, `hooks/` or `.claude-plugin/` without
+  raising the version, since installed copies update only when it changes.
+
+### Changed
+
+- `remove` also removes the folders it leaves empty: the project's state folder and herdr's
+  per-repository worktree folder.
+
+## [0.1.0] - 2026-11-07
 
 First version. Experimental: every part is in place and checked on its own, against herdr 0.9.5
 and Claude Code 2.1.318 where it could be; a full run on a real project, from the first task to a
@@ -27,8 +43,7 @@ merge request, is still to do.
   - `.worktreeinclude` names ignored files (a test account's `.env`) to copy into each worktree,
     decided by the worktree's own git so nothing committed is overwritten.
   - `prompt --no-wait` returns as soon as the worker starts, so a caller is never held past Claude
-    Code's 2-minute Bash limit. `remove` works after the user closed the worker's workspace,
-    and removes the folders it leaves empty (the project's state, herdr's per-repository folder).
+    Code's 2-minute Bash limit. `remove` works after the user closed the worker's workspace.
   - `prompt` refuses a worker whose Claude did not load mcv's hooks (no `rules-loaded` marker from
     its SessionStart hook), which would otherwise work with no git rules and never report; the
     message names the folder trust dialog first, the usual cause, which herdr reports as idle
@@ -61,11 +76,10 @@ merge request, is still to do.
   started.
 - `skills/mcv/SKILL.md`: the `/mcv` skill the coordinator follows. Builds `.claude/mcv.json` with the
   user (proposing `base` and `context` where they matter, at the top level or per repository
-  with an object entry that wins over them), offers to ignore the file on this machine when git
-  does not, confirms every worker before starting
+  with an object entry that wins over them), confirms every worker before starting
   it, keeps at most `max_workers` active, labels questions `<task id> #<n>`, writes into each task
   the facts the worker cannot find itself, reads the worker's screen before sending an answer, and
   never answers a question or approves a dialog for the user.
-- Tests: 375 checks in `tests/`, against a fake herdr that does the git work for real, passing on
+- Tests: 369 checks in `tests/`, against a fake herdr that does the git work for real, passing on
   macOS (bash 3.2); the first 300 also on Ubuntu 24.04. Four adversarial QA passes; every fix came
   with a regression test that failed before it.
