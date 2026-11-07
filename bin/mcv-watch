@@ -5,7 +5,9 @@
 # wakes the coordinator for a turn, so only lines worth a turn are printed.
 #
 # Usage:
-#   mcv-watch <project>            poll every MCV_WATCH_INTERVAL seconds (default 5) until killed
+#   mcv-watch <project>            poll every MCV_WATCH_INTERVAL seconds (default 5) until killed;
+#                                  exits 1 at once if a watcher for <project> already runs
+#                                  (lock: $MCV_HOME/<project>/watch.lock)
 #   mcv-watch <project> --once     one poll, keeping state in MCV_WATCH_STATE (for tests)
 #
 # Printed, one line per event, tab-separated:
@@ -250,13 +252,42 @@ if [[ -n "$once" ]]; then
   exit 0
 fi
 
+# One watcher per project. A second one would print every event twice, and
+# a coordinator can lose track of the one it started (a context compaction,
+# say). The lock holds the watcher's pid; it counts as held only while that
+# pid is still an mcv-watch, so a crashed watcher's lock, or its pid reused
+# by another program, does not block the next one.
+lock="$MCV_HOME/$project/watch.lock"
+mkdir -p "$MCV_HOME/$project"
+holder() {
+  local pid
+  pid="$(cat "$lock/pid" 2>/dev/null || true)"
+  [[ "$pid" =~ ^[0-9]+$ ]] && ps -p "$pid" -o command= 2>/dev/null | grep -q mcv-watch && printf '%s' "$pid"
+}
+if ! mkdir "$lock" 2>/dev/null; then
+  # A watcher starting this instant has made the lock but not yet written
+  # its pid.
+  [[ -s "$lock/pid" ]] || sleep 1
+  if pid="$(holder)"; then
+    printf 'mcv-watch: a watcher for %s is already running (pid %s); use that one, or if no session is reading it, stop it with: kill %s\n' \
+      "$project" "$pid" "$pid" >&2
+    exit 1
+  fi
+  rm -rf "$lock"
+  mkdir "$lock" 2>/dev/null \
+    || { printf 'mcv-watch: another watcher for %s started at the same moment\n' "$project" >&2; exit 1; }
+fi
+printf '%s\n' "$$" >"$lock/pid"
+
 state="${MCV_WATCH_STATE:-}"
+tmpstate=""
 if [[ -z "$state" ]]; then
   state="$(mktemp -d)"
-  # The Monitor tool stops the watcher with a signal, usually mid-sleep.
-  trap 'rm -rf "$state"; exit 0' INT TERM
-  trap 'rm -rf "$state"' EXIT
+  tmpstate="$state"
 fi
+# The Monitor tool stops the watcher with a signal, usually mid-sleep.
+trap 'exit 0' INT TERM
+trap 'rm -rf "$lock"; [[ -z "$tmpstate" ]] || rm -rf "$tmpstate"' EXIT
 mkdir -p "$state"
 while true; do
   poll "$state"

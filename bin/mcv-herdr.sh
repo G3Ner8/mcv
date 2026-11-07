@@ -16,9 +16,10 @@
 #   spawn <project> <id> <repo-path> <new-branch> [--base <ref>] [--context <folder>] [-- <claude-args>...]
 #       Fetch, then create a git worktree of <repo-path> on a branch that must
 #       not exist yet, locally or on a remote (main, master and develop are
-#       always refused), starting from <ref> (default: the remote's default
-#       branch, e.g. origin/main; a repository with no remote uses its current
-#       HEAD). The new branch has no upstream until the worker pushes it. One
+#       always refused), starting from <ref> (default: the default branch of
+#       origin, or of the only remote when none is called origin, e.g.
+#       origin/main; a repository with no remote uses its current HEAD;
+#       several remotes and no origin need --base). The new branch has no upstream until the worker pushes it. One
 #       spawn runs at a time per repository; a second one waits for the
 #       first. herdr chooses the folder, under ~/.herdr/worktrees/. Then start
 #       an idle Claude in it with MCV_TASK=<project>/<id> set. Send it work with `prompt`. Arguments after
@@ -66,7 +67,8 @@
 #
 # Output: one JSON object, except `read` and `agents`. Errors: one line on
 # stderr, "mcv-herdr: <command>: <reason>", exit 1. Unknown command: this text,
-# exit 2. Task state: ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/meta.
+# exit 2. Task state: ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/meta
+# (a relative MCV_HOME is taken from the current folder).
 
 # For maintainers: this is the only file in mcv that calls herdr. Every other
 # mcv file goes through it, so a change in herdr's CLI is fixed here alone.
@@ -75,6 +77,9 @@ set -euo pipefail
 
 MIN_HERDR="0.9.5"
 MCV_HOME="${MCV_HOME:-$HOME/.claude/mcv}"
+# spawn hands MCV_HOME to the worker, whose folder is its worktree: a
+# relative path would point somewhere else there.
+[[ "$MCV_HOME" == /* ]] || MCV_HOME="$PWD/$MCV_HOME"
 PROJECT_RE='^[a-z][a-z0-9_-]*$'
 ID_RE='^[a-z0-9][a-z0-9_-]*$'
 CMD="${1:-}"
@@ -162,7 +167,9 @@ task_dir() {
 # it is still held. The lock holds "<pid> <epoch seconds>". A lock whose pid
 # has exited without releasing it (a crash) is taken over, but only if it is
 # unchanged since it was read and at least 2 seconds old, so a lock another
-# process has just taken is never deleted.
+# process has just taken is never deleted. A lock with no pid at all was
+# left by a process killed between making it and writing the pid; it is
+# taken over once the folder is a minute old, far longer than that gap.
 take_lock() {
   local l="$1" seen pid at i=0
   mkdir -p "$(dirname "$l")"
@@ -172,6 +179,11 @@ take_lock() {
     if [[ "$pid" =~ ^[0-9]+$ && "$at" =~ ^[0-9]+$ ]] && (( $(date +%s) - at >= 2 )) \
       && ! kill -0 "$pid" 2>/dev/null \
       && [[ "$(cat "$l/pid" 2>/dev/null || true)" == "$seen" ]]; then
+      rm -rf "$l"
+      continue
+    fi
+    if [[ -z "$seen" && -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ]] \
+      && [[ ! -s "$l/pid" ]]; then
       rm -rf "$l"
       continue
     fi
@@ -406,7 +418,7 @@ cmd_spawn() {
   trap 'exit 143' TERM
   trap 'exit 129' HUP
   take_lock "$MCV_HOME/.claims/$name" 0 \
-    || die "another spawn of worker '$name' is running"
+    || die "another spawn of worker '$name' is running; if none is, delete $MCV_HOME/.claims/$name"
   CLAIM="$MCV_HOME/.claims/$name"
 
   local dir="$MCV_HOME/$project/tasks/$id"
@@ -449,16 +461,29 @@ cmd_spawn() {
   NEW_ROOT="$root"
 
   # Start from the latest remote state, as a person would pull before
-  # branching: fetch, then branch from --base, or from the remote's default
-  # branch. A repository with no remote branches from its current HEAD. A
-  # --base that is not on a remote (a local branch) is used as it is.
+  # branching: fetch, then branch from --base, or from the default branch of
+  # origin, or of the only remote when none is called origin. A repository
+  # with no remote branches from its current HEAD. A --base that is not on a
+  # remote (a local branch) is used as it is.
   local remote r
-  if [[ -z "$base" ]] && git -C "$root" remote get-url origin >/dev/null 2>&1; then
-    git -C "$root" remote set-head origin --auto >/dev/null 2>&1 || true
-    base="$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-    # Falling back to the local HEAD here would start a stale branch quietly.
-    [[ -n "$base" ]] \
-      || die "cannot tell origin's default branch in $root (offline?); pass --base <ref>"
+  if [[ -z "$base" ]]; then
+    local -a remotes=()
+    while IFS= read -r r; do [[ -z "$r" ]] || remotes+=("$r"); done < <(git -C "$root" remote)
+    remote=""
+    if git -C "$root" remote get-url origin >/dev/null 2>&1; then
+      remote=origin
+    elif (( ${#remotes[@]} == 1 )); then
+      remote="${remotes[0]}"
+    elif (( ${#remotes[@]} > 1 )); then
+      die "$root has several remotes and none is called origin; pass --base <remote>/<branch>"
+    fi
+    if [[ -n "$remote" ]]; then
+      git -C "$root" remote set-head "$remote" --auto >/dev/null 2>&1 || true
+      base="$(git -C "$root" symbolic-ref --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)"
+      # Falling back to the local HEAD here would start a stale branch quietly.
+      [[ -n "$base" ]] \
+        || die "cannot tell $remote's default branch in $root (offline, or nothing pushed there yet?); pass --base <ref>"
+    fi
   fi
   if [[ -n "$base" ]]; then
     remote="${base%%/*}"
@@ -616,8 +641,10 @@ cmd_prompt() {
   # mcv's SessionStart hook leaves this marker. Without it the worker's
   # Claude did not load the mcv plugin, so it has no git rules, may use
   # AskUserQuestion and never writes the status log: give it no work.
+  # herdr reports a worker still at Claude's folder trust question as idle,
+  # and Claude runs the hook only once past it, so that is checked first.
   [[ -f "$d/rules-loaded" ]] \
-    || die "worker $task started without the mcv worker rules: the mcv plugin is not loaded in its Claude session (install it for your user, or spawn with -- --plugin-dir <mcv folder>); remove it and spawn again"
+    || die "worker $task has no mcv worker rules yet: if its pane shows Claude's folder trust question, pick Yes there and prompt again; otherwise the mcv plugin is not loaded in its Claude session (install it for your user, or spawn with -- --plugin-dir <mcv folder>), so remove it and spawn again"
 
   # Return as soon as the worker has started (or stopped at a dialog); herdr
   # fails the call if neither happens within 15 seconds.

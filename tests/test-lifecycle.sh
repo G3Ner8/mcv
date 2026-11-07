@@ -92,7 +92,9 @@ out="$(FAKE_NOHOOKS=1 "$H" spawn acme t4 "$repo" fix/t4 2>&1)"; rc=$?
 expect "spawn of a worker without hooks still succeeds" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 out="$("$H" prompt acme/t4 "hello" --no-wait 2>&1)"; rc=$?
 expect "prompt refuses a worker that never got mcv's rules" \
-  '[[ $rc -eq 1 && "$out" == *"without the mcv worker rules"* && $(printf "%s\n" "$out" | wc -l) -eq 1 ]]' "rc=$rc $out"
+  '[[ $rc -eq 1 && "$out" == *"has no mcv worker rules yet"* && $(printf "%s\n" "$out" | wc -l) -eq 1 ]]' "rc=$rc $out"
+expect "that refusal names the trust dialog first, as the usual cause" \
+  '[[ "$out" == *"trust"*"plugin is not loaded"* ]]' "$out"
 expect "that refused prompt sent nothing" '! grep -q "^agent prompt acme-t4" "$FAKE_DIR/calls"'
 
 # remove after the user closed the worker's workspace: git removes the

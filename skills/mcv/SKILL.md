@@ -75,7 +75,10 @@ Skip this skill for:
    `.env`, say), tell the user they can list them in a `.worktreeinclude` file at that repo's root
    (`.gitignore` syntax); `spawn` copies them into each worktree.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
-   tool: `BIN/mcv-watch <project>`. Never start a second one for the same project.
+   tool: `BIN/mcv-watch <project>`. Never start a second one for the same project. If it exits at
+   once saying a watcher is already running, check your Monitor tasks: if that one is yours, keep
+   using it; if not, another session is watching this project, so tell the user, with the pid the
+   message gives, and let them choose to stop it (`kill <pid>`) or work from that session.
 
 ## Apply
 
@@ -121,9 +124,10 @@ Skip this skill for:
 6. **Send the task.** `BIN/mcv-herdr.sh prompt <project>/<id> "<dispatch, with {task} replaced>"
    --no-wait`. It returns within seconds with the state `working` (or `blocked` if the worker hit a
    dialog at once). Never call `prompt` without `--no-wait`: Claude Code's Bash tool stops waiting
-   after 2 minutes. If it refuses because the worker started without the mcv worker rules, the mcv
-   plugin is not loaded in that worker: tell the user, offer `remove`, and start no more workers
-   until it is fixed; every worker would have the same problem.
+   after 2 minutes. If it refuses because the worker has no mcv worker rules yet, `read` its
+   screen. At Claude's folder trust question, ask the user to pick "Yes" in its pane, then send
+   again. Otherwise the mcv plugin is not loaded in that worker: tell the user, offer `remove`,
+   and start no more workers until it is fixed; every worker would have the same problem.
 7. Tell the user the workers are running, and carry on with the conversation. The watcher wakes you.
 
 The worker's own rules (how to ask, git rules, staying in its worktree) reach it through mcv's

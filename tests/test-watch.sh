@@ -325,5 +325,38 @@ wait "$wpid" 2>/dev/null
 took=$(( $(date +%s) - start ))
 expect "TERM stops the watcher within 2 seconds (interval 30)" '[[ $took -le 2 ]]' "took ${took}s"
 
+# One watcher per project: a second one refuses, naming the first's pid, so
+# no event is printed twice. A watcher that died without cleaning up does not
+# block the next.
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
+wpid=$!
+sleep 1
+# Run in the background and stopped after a second, so a watcher that does
+# not refuse fails this check instead of hanging the suite.
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >"$root/w2.out" 2>&1 &
+w2=$!
+sleep 1
+if kill -0 "$w2" 2>/dev/null; then
+  kill -TERM "$w2"; wait "$w2" 2>/dev/null; rc=running
+else
+  wait "$w2"; rc=$?
+fi
+out="$(cat "$root/w2.out")"
+expect "a second watcher for the same project refuses at once" \
+  '[[ $rc == 1 && "$out" == *"already running"*"$wpid"* ]]' "rc=$rc $out"
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" brew >/dev/null 2>&1 &
+bpid=$!
+sleep 1
+expect "a watcher for another project runs alongside" 'kill -0 "$bpid" 2>/dev/null'
+kill -TERM "$wpid" "$bpid"; wait "$wpid" "$bpid" 2>/dev/null
+sleep 0 & dead=$!; wait "$dead"
+mkdir -p "$MCV_HOME/acme/watch.lock"; echo "$dead" >"$MCV_HOME/acme/watch.lock/pid"
+MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
+wpid=$!
+sleep 1
+expect "a lock left by a dead watcher is taken over" 'kill -0 "$wpid" 2>/dev/null'
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+expect "a stopped watcher releases its lock" '[[ ! -e "$MCV_HOME/acme/watch.lock" ]]'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

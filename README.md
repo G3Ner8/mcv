@@ -115,20 +115,22 @@ Run `H` with no arguments for every command and option.
 - `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.
 - `spawn` needs a branch name that does not exist yet, locally or on a remote; `main`, `master` and
-  `develop` are always refused. It fetches first, then starts the branch from the remote's default
-  branch (for example `origin/main`), or from `--base <ref>` if you give one, so a worker never starts
-  from a stale or unrelated checkout. A repository with no remote starts from its current HEAD; a
-  `--base` that names a local branch is used as it is. If the remote's default branch cannot be found
-  (for example offline), `spawn` stops and asks for `--base` rather than branch from a stale HEAD. The
+  `develop` are always refused (names are compared ignoring letter case). It fetches first, then
+  starts the branch from the default branch of `origin` (for example `origin/main`), or of the only
+  remote when none is called `origin`, or from `--base <ref>` if you give one, so a worker never
+  starts from a stale or unrelated checkout. A repository with no remote starts from its current
+  HEAD; a `--base` that names a local branch is used as it is. If the default branch cannot be found
+  (offline, several remotes and none called `origin`, nothing pushed yet), `spawn` stops and asks
+  for `--base` rather than branch from a stale HEAD. The
   new branch has no upstream, so a plain `git push` from the worker cannot reach the base branch; the
   worker sets one when it first pushes its own branch. Two spawns in the same repository run one
   after the other. `--context <folder>` and `.worktreeinclude`: see
   [What a worker has](#what-a-worker-has). The worktree goes under `~/.herdr/worktrees/`. If no herdr workspace is open for
   that repository yet, herdr also opens one for its main checkout.
 - If `spawn` fails while starting Claude, the task is left in place. The usual cause is Claude's
-  folder trust dialog, shown the first time Claude opens a folder; its default answer is "No, exit",
-  so pick "Yes" in the worker's herdr pane, and `prompt` then works. Otherwise run `remove` before
-  using the same id again.
+  folder trust dialog, shown the first time Claude opens a folder. Every worktree is a new folder,
+  so expect it at every spawn. Its default answer is "No, exit": pick "Yes" in the worker's herdr
+  pane, and `prompt` then works. Otherwise run `remove` before using the same id again.
 - `prompt` waits until the worker stops, up to 10 minutes by default (`--timeout <ms>`). It prints only
   the worker's new state; `read` shows what the worker said. When Claude runs the helper for you, its
   Bash tool stops waiting after 2 minutes unless given a longer timeout, so for long work use
@@ -137,14 +139,16 @@ Run `H` with no arguments for every command and option.
   Files your `.gitignore` ignores (build output, dependencies, a local `.env`) are deleted with the
   worktree. The branch stays as a local branch; push it first if you need it elsewhere. It also works after you have closed the worker's
   herdr workspace yourself.
-- `prompt` refuses a worker whose Claude did not load the mcv plugin, since such a worker has none
-  of mcv's rules (below) and never reports its questions. This happens when mcv is installed for
-  one project only, or when you run the helper from a clone: pass `-- --plugin-dir <that clone>`
-  to `spawn`. `remove` the worker and spawn it again.
+- `prompt` refuses a worker that has not received mcv's rules (below), since it would never
+  report its questions. Usually it is still at the folder trust dialog: pick "Yes" there and
+  prompt again. Otherwise its Claude did not load the mcv plugin, which happens when mcv is
+  installed for one project only, or when you run the helper from a clone (pass
+  `-- --plugin-dir <that clone>` to `spawn`); `remove` the worker and spawn it again.
 - `read` shows the worker's screen even after Claude has exited there; `prompt` then says the worker
   is no longer running Claude.
 - Task state is kept outside every repository, in `~/.claude/mcv/<project>/tasks/<id>/`; set
-  `MCV_HOME` to keep it elsewhere (`spawn` passes it on to each worker).
+  `MCV_HOME` to keep it elsewhere (`spawn` passes it on to each worker; a relative path is taken
+  from the folder you run the helper in).
 
 Worker states, as herdr reports them:
 

@@ -43,7 +43,8 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    1. Validate names; claim the worker name (`$MCV_HOME/.claims/<name>`), so no second spawn of it
       or of a name that joins the same can run; clear a task folder that has no meta.
    2. Refuse an existing branch, locally or on a remote, ignoring case, and `main`/`master`/`develop`.
-   3. Lock the repository (`$MCV_HOME/.locks/<repo key>`), fetch, resolve the base.
+   3. Lock the repository (`$MCV_HOME/.locks/<repo key>`), fetch, resolve the base (`--base`, else
+      the default branch of `origin` or of the only remote, else HEAD when there is no remote).
    4. `herdr worktree create`; write meta at once, with a `starting` marker.
    5. Check the worktree is not the main checkout; clear the branch's upstream; release the lock.
    6. Refuse a context that holds the worktree; copy `.worktreeinclude` files; rewrite meta with
@@ -73,6 +74,7 @@ Everything lives under `$MCV_HOME` (default `~/.claude/mcv`), outside every repo
 $MCV_HOME/
   .claims/<project>-<id>/pid          held during one spawn of that worker name
   .locks/<repo key>/pid               held while one spawn fetches and creates a worktree there
+  <project>/watch.lock/pid            held by the one mcv-watch of that project
   <project>/tasks/<id>/
     meta                              JSON, written whole and renamed into place
     starting                          present until Claude has started
@@ -92,7 +94,9 @@ an answer the coordinator could not send yet.
 
 **Locks** are folders created with `mkdir` (atomic) holding `<pid> <epoch seconds>`. A lock whose
 pid has exited without releasing it is taken over, but only when it is unchanged since read and at
-least 2 seconds old, so a lock another process has just taken is never deleted.
+least 2 seconds old, so a lock another process has just taken is never deleted. A claim or repo lock
+with no pid (its holder was killed between making it and writing the pid) is taken over once it is
+a minute old. The watch lock holds only a pid and counts as held while that pid is an mcv-watch.
 
 **Watcher state** (in `$MCV_WATCH_STATE`, a temporary folder by default), one line per task in
 `<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last kind> <gone>

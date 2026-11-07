@@ -102,6 +102,14 @@ expect "pending for an unasked question exits 1" '[[ $rc -eq 1 ]]' "rc=$rc"
 env -u MCV_TASK "$S" --task shop/t1 answered q2 "keep the old route"; rc=$?
 expect "a pending question can still be answered" '[[ $rc -eq 0 ]]' "rc=$rc"
 
+# Text given without quotes arrives whole, not cut to its first word.
+"$S" note halfway through the cart >/dev/null
+expect "unquoted report text is kept whole" '[[ "$(tail -1 "$log" | cut -f4)" == "halfway through the cart" ]]' "$(tail -1 "$log")"
+q="$("$S" needs-decision Per drink or per order?)"
+env -u MCV_TASK "$S" --task shop/t1 answered "$q" per drink >/dev/null; rc=$?
+expect "unquoted answer text is kept whole" \
+  '[[ $rc -eq 0 && "$(tail -1 "$log" | cut -f2-4)" == "answered"$'"'"'\t'"'"'"$q"$'"'"'\t'"'"'"per drink" ]]' "rc=$rc $(tail -1 "$log")"
+
 # Hook outputs with MCV_TASK set.
 c="$("$S" --contract)"
 expect "--contract marks that the worker got its rules" '[[ -f "$home/shop/tasks/t1/rules-loaded" ]]'

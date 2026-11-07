@@ -129,5 +129,38 @@ echo "$dead $(( $(date +%s) - 60 ))" >"$MCV_HOME/.locks/$key/pid"
 out="$(spawn t5 "$repo" fix/five 2>&1)"; rc=$?
 expect "a stale lock is taken over" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 
+# A claim left with no pid file (killed between making it and writing the
+# pid) blocks that worker name only while it is fresh; the refusal names the
+# folder to delete.
+mkdir -p "$MCV_HOME/.claims/acme-c1"
+out="$(spawn c1 "$repo" fix/c1 2>&1)"; rc=$?
+expect "a fresh claim without a pid is refused, naming its folder" \
+  '[[ $rc -eq 1 && "$out" == *"$MCV_HOME/.claims/acme-c1"* ]]' "rc=$rc $out"
+touch -t 202001010000 "$MCV_HOME/.claims/acme-c1"
+out="$(spawn c1 "$repo" fix/c1 2>&1)"; rc=$?
+expect "an old claim without a pid is taken over" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+
+# A relative MCV_HOME reaches the worker as an absolute path: the worker
+# runs in its worktree, where the relative one would point elsewhere.
+out="$(cd "$root" && MCV_HOME=relhome "$H" spawn acme r1 "$repo" fix/r1 2>&1)"; rc=$?
+expect "spawn with a relative MCV_HOME succeeds" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+expect "the worker's MCV_HOME is absolute" \
+  'grep "^agent start acme-r1 " "$FAKE_DIR/calls" | grep -qF "\"MCV_HOME\":\"$root/relhome\""' \
+  "$(grep '^agent start acme-r1 ' "$FAKE_DIR/calls")"
+expect "the task is kept under the absolute MCV_HOME" '[[ -f "$root/relhome/acme/tasks/r1/meta" ]]'
+
+# A repository whose only remote is not called origin branches from that
+# remote's default branch, not quietly from its own HEAD.
+git clone -q -o upstream "$root/origin.git" "$root/up"
+git -C "$root/up" commit -q --allow-empty -m "local only"
+out="$(spawn u1 "$root/up" fix/u1 2>&1)"; rc=$?
+expect "only remote 'upstream': base is upstream/main" \
+  '[[ $rc -eq 0 && "$(jq -r .base <<<"$out")" == upstream/main ]]' "rc=$rc $out"
+git -C "$root/up" remote add mirror "$root/origin.git"
+git -C "$root/up" fetch -q mirror
+out="$(spawn u2 "$root/up" fix/u2 2>&1)"; rc=$?
+expect "several remotes, none origin: refused, asking for --base" \
+  '[[ $rc -eq 1 && "$out" == *"--base"* && $(printf "%s\n" "$out" | wc -l) -eq 1 ]]' "rc=$rc $out"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]
