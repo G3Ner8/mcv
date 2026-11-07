@@ -122,7 +122,10 @@ H agents                                     # every herdr agent and its state
 H remove brewly/cart-fix                     # close it; the branch is kept
 ```
 
-Run `H` with no arguments for every command and option.
+Run `H` with no arguments for every command and option. By hand you also see what the coordinator
+would: `mcv-watch <project>` (next to `H`) prints each question and stop as it happens, and
+`mcv-status --task <project>/<id> answered q<n> "<answer>"` records an answer you sent with
+`prompt`. Run either with no arguments for its usage.
 
 - `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.

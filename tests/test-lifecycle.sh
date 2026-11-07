@@ -96,6 +96,15 @@ expect "prompt refuses a worker that never got mcv's rules" \
 expect "that refusal names the trust dialog first, as the usual cause" \
   '[[ "$out" == *"trust"*"plugin is not loaded"* ]]' "$out"
 expect "that refused prompt sent nothing" '! grep -q "^agent prompt acme-t4" "$FAKE_DIR/calls"'
+# herdr may report a worker at the trust question as blocked rather than
+# idle; with no rules yet, the refusal still points at that question.
+out="$(FAKE_AGENT_STATE=blocked "$H" prompt acme/t4 "hello" --no-wait 2>&1)"; rc=$?
+expect "a blocked worker without rules is refused with the trust hint" \
+  '[[ $rc -eq 1 && "$out" == *blocked* && "$out" == *trust* ]]' "rc=$rc $out"
+# herdr's newer code for a Claude that has exited reads like the others.
+out="$(FAKE_FAIL=notrunning "$H" prompt acme/t2 "hello" --no-wait 2>&1)"; rc=$?
+expect "agent_not_running explains the worker is not running Claude" \
+  '[[ $rc -eq 1 && "$out" == *"not running Claude any more"* ]]' "rc=$rc $out"
 
 # prompt with no text: an option where the text should be, or empty text,
 # is refused rather than sent (and then waited on for 10 minutes).
