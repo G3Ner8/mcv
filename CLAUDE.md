@@ -9,7 +9,7 @@ rules below in full.
 ## Commands
 
 ```
-make check        lint, JSON and versions, version raised, the whole suite (under a minute);
+make check        lint, JSON and versions, version raised, the whole suite (2-3 minutes);
                   before every commit
 make test         the suite only (tests/run.sh; tests/run.sh test-x.sh runs one file)
 make lint         shellcheck

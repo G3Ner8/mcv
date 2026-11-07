@@ -64,7 +64,43 @@ log_of() {
 # taken over. Checking only the pid is not enough: between reading it and
 # deleting the lock, that holder can release and another writer take the
 # lock, which would then be deleted. So the lock is taken over only if it is
-# unchanged since it was read and at least 2 seconds old.
+# unchanged since it was read and at least 2 seconds old, and only under a
+# second lock (see takeover).
+#
+# Two writers that both found the lock stale could otherwise each delete it:
+# the first deletes it and makes its own, the second, which checked before
+# that, deletes the first one's new lock, and both write at once (measured:
+# repeated question ids in most rounds of 12 writers on a stale lock).
+# takeover holds <lock>.takeover while it checks again, deletes and makes
+# the lock, and writes its pid before letting go, so the next writer in sees
+# a live holder. A takeover lock left by a writer killed mid-takeover is
+# cleared the same way a stale lock is noticed: its pid has exited and it
+# is at least 2 seconds old, or it has no pid and is a minute old.
+takeover() {
+  local l="$1" seen="$2" t="$1.takeover" tseen tpid tat ok=1
+  if ! mkdir "$t" 2>/dev/null; then
+    tseen="$(cat "$t/pid" 2>/dev/null || true)"
+    read -r tpid tat <<<"$tseen" || true
+    if [[ "$tpid" =~ ^[0-9]+$ && "$tat" =~ ^[0-9]+$ ]] && (( $(date +%s) - tat >= 2 )) \
+      && ! kill -0 "$tpid" 2>/dev/null; then
+      rm -rf "$t"
+    elif [[ -z "$tseen" && -n "$(find "$t" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+      rm -rf "$t"
+    fi
+    return 1
+  fi
+  printf '%s %s\n' "$$" "$(date +%s)" >"$t/pid"
+  if [[ "$(cat "$l/pid" 2>/dev/null || true)" == "$seen" ]]; then
+    rm -rf "$l"
+    if mkdir "$l" 2>/dev/null; then
+      printf '%s %s\n' "$$" "$(date +%s)" >"$l/pid"
+      ok=0
+    fi
+  fi
+  rm -rf "$t"
+  return "$ok"
+}
+
 LOCK=""
 lock_log() {
   local l="$1.lock" seen pid at now i=0
@@ -75,8 +111,7 @@ lock_log() {
     if [[ "$pid" =~ ^[0-9]+$ && "$at" =~ ^[0-9]+$ ]] && (( now - at >= 2 )) \
       && ! kill -0 "$pid" 2>/dev/null \
       && [[ "$(cat "$l/pid" 2>/dev/null || true)" == "$seen" ]]; then
-      rm -rf "$l"
-      continue
+      takeover "$l" "$seen" && break
     fi
     (( i++ < 200 )) || die "the status log is locked ($l); delete it if no mcv-status is running"
     sleep 0.05

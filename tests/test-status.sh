@@ -219,6 +219,25 @@ mkdir "$log2.lock" && echo "$dead $(( $(date +%s) - 60 ))" >"$log2.lock/pid"
 MCV_TASK=shop/t2 "$S" note "after a stale lock" >/dev/null 2>&1; rc=$?
 expect "a stale lock is taken over" '[[ $rc -eq 0 && "$(tail -1 "$log2")" == *"after a stale lock" ]]' "rc=$rc"
 
+# Several writers that all find the same stale lock: exactly one takes it
+# over at a time, so question ids still never repeat. Taking over was check,
+# then delete, so a second writer could delete the lock the first had just
+# made, and both wrote at once.
+mkdir -p "$home/shop/tasks/t4"
+echo '{}' >"$home/shop/tasks/t4/meta"
+log4="$home/shop/tasks/t4/status.log"
+dupes=0
+for round in $(seq 1 25); do
+  mkdir "$log4.lock" && echo "$dead $(( $(date +%s) - 60 ))" >"$log4.lock/pid"
+  for i in $(seq 1 12); do MCV_TASK=shop/t4 "$S" needs-decision "round $round question $i" >"$home/r$i" 2>/dev/null & done
+  wait
+  [[ "$(cat "$home"/r* | sort | uniq -d)" == "" ]] || dupes=$((dupes + 1))
+  rm -f "$home"/r*
+done
+expect "12 writers on a stale lock, 25 rounds: no question id repeats" '[[ $dupes -eq 0 ]]' "$dupes rounds had repeats"
+expect "every question was written" '[[ "$(cut -f2 "$log4" | grep -cx needs-decision)" -eq 300 ]]' "$(cut -f2 "$log4" | grep -cx needs-decision)"
+expect "no lock or takeover lock left behind" '[[ ! -e "$log4.lock" && ! -e "$log4.lock.takeover" ]]'
+
 # A lock just taken (under 2 seconds old) is never taken over, even when its
 # pid has exited: that pid may have just released it to another writer.
 mkdir "$log2.lock" && echo "$dead $(date +%s)" >"$log2.lock/pid"

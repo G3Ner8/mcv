@@ -34,7 +34,7 @@ docs/             architecture.md, adr/ (decision records)
 
 ```
 make check          lint, JSON and versions, the version check, then the whole test suite
-                    (about a minute)
+                    (two to three minutes)
 make test           the test suite only
 make test-hooks     the hook-guard test alone (what CI runs)
 make lint           shellcheck: bin/ at style level, tests/ at warning level

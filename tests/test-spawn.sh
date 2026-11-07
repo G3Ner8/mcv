@@ -129,6 +129,25 @@ echo "$dead $(( $(date +%s) - 60 ))" >"$MCV_HOME/.locks/$key/pid"
 out="$(spawn t5 "$repo" fix/five 2>&1)"; rc=$?
 expect "a stale lock is taken over" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 
+# Several spawns that all find the same stale repository lock: one takes it
+# over at a time, so their worktree creations never overlap.
+overlaps=0
+for round in 1 2 3 4 5; do
+  mkdir -p "$MCV_HOME/.locks/$key"
+  echo "$dead $(( $(date +%s) - 60 ))" >"$MCV_HOME/.locks/$key/pid"
+  : >"$FAKE_DIR/order"
+  pids=()
+  for i in 1 2 3 4 5 6 7 8; do
+    FAKE_SLEEP=0.3 spawn "s$round$i" "$repo" "fix/s$round$i" >/dev/null 2>&1 & pids+=($!)
+  done
+  wait "${pids[@]}"
+  order="$(cut -d' ' -f1 "$FAKE_DIR/order" | tr '\n' ' ')"
+  [[ "$order" == "$(printf 'begin end %.0s' 1 2 3 4 5 6 7 8)" ]] || overlaps=$((overlaps + 1))
+done
+expect "8 spawns on a stale repository lock, 5 rounds: worktree creations never overlap" \
+  '[[ $overlaps -eq 0 ]]' "$overlaps rounds overlapped"
+expect "no repository lock or takeover lock left behind" 'locks_empty'
+
 # A claim left with no pid file (killed between making it and writing the
 # pid) blocks that worker name only while it is fresh; the refusal names the
 # folder to delete.

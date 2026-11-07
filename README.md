@@ -143,7 +143,11 @@ would: `mcv-watch <project>` (next to `H`) prints each question and stop as it h
   worker sets one when it first pushes its own branch. Two spawns in the same repository run one
   after the other. `--context <folder>` and `.worktreeinclude`: see
   [What a worker has](#what-a-worker-has). The worktree goes under `~/.herdr/worktrees/`. If no herdr workspace is open for
-  that repository yet, herdr also opens one for its main checkout.
+  that repository yet, herdr also opens one for its main checkout. herdr's sidebar lists each
+  worker under the workspace it takes as that main checkout, which is not always the
+  coordinator's. In the first run they appeared under another workspace open on the same
+  repository. Starting the coordinator in a workspace opened in the repository's folder, with no
+  other workspace open on it, should keep them under the coordinator; that is not yet measured.
 - If `spawn` fails while starting Claude, the task is left in place. The usual cause is Claude's
   folder trust dialog. Claude keeps that trust per repository, counting a worktree as its
   repository's main checkout, so the dialog appears only until "Yes" has been picked once for the

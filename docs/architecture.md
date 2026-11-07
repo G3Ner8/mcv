@@ -79,7 +79,7 @@ $MCV_HOME/
   .claims/<project>-<id>/pid          held during one spawn of that worker name
   .locks/<repo key>/pid               held while one spawn fetches and creates a worktree there
   <project>/watch.lock/pid            held by the one mcv-watch of that project
-  <project>/watch.lock.takeover/      held while one mcv-watch takes over a stale watch.lock
+  <lock>.takeover/                    next to any lock below, held while one process takes it over
   <project>/tasks/<id>/
     meta                              JSON, written whole and renamed into place
     starting                          present until Claude has started
@@ -102,9 +102,14 @@ pid has exited without releasing it is taken over, but only when it is unchanged
 least 2 seconds old, so a lock another process has just taken is never deleted. A claim or repo lock
 with no pid (its holder was killed between making it and writing the pid) is taken over once it is
 a minute old. The watch lock holds only a pid and counts as held while that pid is an mcv-watch.
-A stale watch lock is removed only under `watch.lock.takeover`, whose holder checks the pid again
-and writes its own before letting go, so of several watchers starting together exactly one runs; a
-takeover lock left by a killed watcher is cleared after 5 seconds.
+
+Every lock is taken over only under a second lock, `<lock>.takeover`, whose holder checks the
+lock again, deletes it, makes its own and writes its pid before letting go. Without it, two
+processes that both found a lock stale could each delete it, the second deleting the first one's
+new lock, and both go ahead: measured as repeated question ids in most rounds of 12 writers on a
+stale log lock, and overlapping worktree creations in 2 of 5 rounds of 8 spawns. A takeover lock
+left by a killed process is cleared when its pid has exited and it is 2 seconds old, or it has no
+pid and is a minute old (5 seconds for the watcher's).
 
 **Watcher state** (in `$MCV_WATCH_STATE`, a temporary folder by default), one line per task in
 `<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last kind> <gone>
@@ -172,9 +177,10 @@ with every herdr window closed.
   that shell's history. It holds the task name and paths only.
 - `remove` leaves open the workspace herdr opened for the repository's main checkout on the first
   spawn there.
+- herdr shows each worker under the workspace it takes as its repository's main checkout, not
+  under the coordinator's; mcv cannot choose (measured: `worktree create --workspace` names the
+  repository through an open workspace, in place of `--cwd`, and does not pick a parent).
 - SIGKILL to `spawn` while herdr creates the worktree can leave that worktree behind.
-- One concurrency check of the status-log lock failed once on GitHub's shared runner and could not
-  be reproduced in 90 local runs; watch for repeated question ids in real use.
 
 ## Next
 
