@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
 # Tests for `mcv-herdr.sh spawn`'s git safety, against a fake herdr that does
-# the git work for real (tests/mcv/fixtures/fake-herdr.sh). Needs bash, git
-# and jq; no herdr.
-# Run: tests/mcv/test-spawn.sh   (exit 0 when every check passes)
+# the git work for real (tests/fixtures/fake-herdr.sh). Needs bash, git and
+# jq; no herdr.
+# Run: tests/test-spawn.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-H="$(cd "$HERE/../../plugins/mcv/bin" && pwd -P)/mcv-herdr.sh"
+H="$(cd "$HERE/../bin" && pwd -P)/mcv-herdr.sh"
 
 pass=0
 fail=0

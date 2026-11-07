@@ -3,13 +3,13 @@
 # Tests for spawn when it is interrupted, races another spawn, or finds
 # leftovers: nothing may be left that `remove` cannot clean up, and two
 # spawns may never both own one task or worker name. Runs against
-# tests/mcv/fixtures/fake-herdr.sh. Needs bash, git and jq.
-# Run: tests/mcv/test-interrupt.sh   (exit 0 when every check passes)
+# tests/fixtures/fake-herdr.sh. Needs bash, git and jq.
+# Run: tests/test-interrupt.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-BIN="$(cd "$HERE/../../plugins/mcv/bin" && pwd -P)"
+BIN="$(cd "$HERE/../bin" && pwd -P)"
 H="$BIN/mcv-herdr.sh"
 S="$BIN/mcv-status"
 

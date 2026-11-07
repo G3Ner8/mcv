@@ -2,14 +2,14 @@
 #
 # Tests for the task lifecycle in mcv-herdr.sh (task names, spawn's starting
 # marker, prompt to a worker whose Claude has exited, remove after the user
-# closed the workspace), against tests/mcv/fixtures/fake-herdr.sh. Needs
-# bash, git and jq; no herdr.
-# Run: tests/mcv/test-lifecycle.sh   (exit 0 when every check passes)
+# closed the workspace), against tests/fixtures/fake-herdr.sh. Needs bash,
+# git and jq; no herdr.
+# Run: tests/test-lifecycle.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-H="$(cd "$HERE/../../plugins/mcv/bin" && pwd -P)/mcv-herdr.sh"
+H="$(cd "$HERE/../bin" && pwd -P)/mcv-herdr.sh"
 
 pass=0
 fail=0

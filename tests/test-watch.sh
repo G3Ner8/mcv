@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Tests for plugins/mcv/bin/mcv-watch, one poll at a time (--once) against a
-# stub herdr. Needs bash and jq; no herdr.
-# Run: tests/mcv/test-watch.sh   (exit 0 when every check passes)
+# Tests for bin/mcv-watch, one poll at a time (--once) against a stub herdr.
+# Needs bash and jq; no herdr.
+# Run: tests/test-watch.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-W="$(cd "$HERE/../../plugins/mcv/bin" && pwd -P)/mcv-watch"
+W="$(cd "$HERE/../bin" && pwd -P)/mcv-watch"
 STATUS="$(dirname "$W")/mcv-status"
 
 pass=0

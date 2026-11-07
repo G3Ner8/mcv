@@ -3,13 +3,13 @@
 # Tests for how mcv's scripts refuse bad input and report failures: one line
 # on stderr and exit 1 (2 for usage in mcv-watch), never a raw shell or jq
 # error, and nothing left half made. Runs against
-# tests/mcv/fixtures/fake-herdr.sh. Needs bash, git and jq; no herdr.
-# Run: tests/mcv/test-errors.sh   (exit 0 when every check passes)
+# tests/fixtures/fake-herdr.sh. Needs bash, git and jq; no herdr.
+# Run: tests/test-errors.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-BIN="$(cd "$HERE/../../plugins/mcv/bin" && pwd -P)"
+BIN="$(cd "$HERE/../bin" && pwd -P)"
 H="$BIN/mcv-herdr.sh"
 W="$BIN/mcv-watch"
 

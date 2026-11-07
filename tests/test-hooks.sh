@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 #
-# Tests for plugins/mcv/hooks/hooks.json: every hook does nothing unless
-# MCV_TASK is set (CLAUDE.md Section 2), and does its job when it is. The
-# commands are taken from hooks.json itself and run the way Claude Code runs
-# them, through a shell with CLAUDE_PLUGIN_ROOT set. Needs bash and jq.
-# Run: tests/mcv/test-hooks.sh   (exit 0 when every check passes)
+# Tests for hooks/hooks.json: every hook does nothing unless MCV_TASK names a
+# task (a hook runs in every session where the plugin is installed), and does
+# its job when it does. The commands are taken from hooks.json itself and run
+# the way Claude Code runs them, through a shell with CLAUDE_PLUGIN_ROOT set.
+# Needs bash and jq.
+# Run: tests/test-hooks.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-ROOT="$(cd "$HERE/../../plugins/mcv" && pwd -P)"
+ROOT="$(cd "$HERE/.." && pwd -P)"
 HOOKS="$ROOT/hooks/hooks.json"
 
 pass=0

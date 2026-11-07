@@ -44,9 +44,12 @@ run (use Claude Code subagents inside one session).
 ## Install
 
 ```
-/plugin marketplace add G3Ner8/claude-kit
-/plugin install mcv@claude-kit
+/plugin marketplace add G3Ner8/mcv
+/plugin install mcv@mcv
 ```
+
+This repository is its own marketplace. While it is private, the machine needs git access to it
+(the same access `git clone` would need). Update later with `/plugin marketplace update mcv`.
 
 ## Use it
 
@@ -223,3 +226,16 @@ to push without being told, workers will not push.
 - A worker is marked by the environment variable `MCV_TASK=<project>/<id>`, set only in that worker's
   Claude process. mcv's hooks act only when `MCV_TASK` names a task mcv started, so installing mcv
   does not change your other Claude Code sessions.
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md): the parts, the state they keep, the rules they
+  hold, and the herdr behaviour mcv relies on.
+- [docs/adr/](docs/adr/): why mcv is built the way it is, one decision per record.
+- [CONTRIBUTING.md](CONTRIBUTING.md): working on mcv itself; `make check` runs lint and the tests
+  (no herdr needed).
+- [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

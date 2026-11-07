@@ -1,0 +1,4 @@
+# The tests pass their checks to expect() as single-quoted strings that are
+# eval'd later, so a $ inside single quotes (SC2016) is intended, and a
+# variable read only inside such a string looks unused (SC2034).
+disable=SC2016,SC2034

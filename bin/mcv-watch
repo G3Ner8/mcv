@@ -175,8 +175,8 @@ poll() {
       seq="${row#* }"
       # A new state, or the same state with a moved counter (a whole turn
       # happened between two polls), counts as a transition.
-      if [[ ( "$status" == blocked || "$status" == done ) && ( "$status" != "$prev" || "$seq" != "$prev_seq" ) ]]; then
-        if [[ "$status" == done ]] && [[ "$lastkind" =~ ^(needs-decision|blocked|done|failed)$ ]]; then
+      if [[ ( "$status" == blocked || "$status" == "done" ) && ( "$status" != "$prev" || "$seq" != "$prev_seq" ) ]]; then
+        if [[ "$status" == "done" ]] && [[ "$lastkind" =~ ^(needs-decision|blocked|done|failed)$ ]]; then
           :
         else
           printf '%s\t%s\tstate\t%s\n' "$now" "$task" "$status"

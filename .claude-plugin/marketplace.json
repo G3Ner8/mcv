@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "mcv",
+  "description": "mcv (Multi-session Coordination Vantage): run several Claude Code sessions on one project while you talk to one. Requires the herdr terminal manager.",
+  "owner": {
+    "name": "Chettawat Phosri"
+  },
+  "plugins": [
+    {
+      "name": "mcv",
+      "source": "./",
+      "description": "Experimental, not yet tried end to end. Run several Claude Code sessions on one project while you talk to one: a coordinator session starts worker sessions, each in its own git worktree, and passes their questions and results to you. Requires the herdr terminal manager.",
+      "version": "0.1.0"
+    }
+  ]
+}

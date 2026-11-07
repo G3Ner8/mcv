@@ -126,6 +126,8 @@ jfield() { jq -r "$2 // empty" <<<"$1" 2>/dev/null || true; }
 # a suffix such as -beta is ignored.
 version_ge() {
   local IFS=.
+  # Splitting on IFS=. is the point; both values are cut to digits and dots.
+  # shellcheck disable=SC2206
   local -a a=(${1%%[^0-9.]*}) b=(${2%%[^0-9.]*})
   local i
   for i in 0 1 2; do
@@ -379,9 +381,10 @@ cmd_spawn() {
   fi
   # --branch also expands shorthands such as @{-1}, so the name must come back
   # unchanged; "@" alone is git's name for HEAD.
-  [[ "$branch" != @ && "$(git check-ref-format --branch "$branch" 2>/dev/null)" == "$branch" ]] \
-    && git check-ref-format "refs/heads/$branch" \
-    || die "'$branch' is not a valid branch name"
+  if [[ "$branch" == @ || "$(git check-ref-format --branch "$branch" 2>/dev/null)" != "$branch" ]] \
+    || ! git check-ref-format "refs/heads/$branch"; then
+    die "'$branch' is not a valid branch name"
+  fi
 
   [[ "$project" =~ $PROJECT_RE ]] \
     || die "project '$project': use lowercase letters, digits, - and _, starting with a letter"
@@ -606,7 +609,7 @@ cmd_prompt() {
   fi
   status="$(jfield "$HOUT" .result.agent.agent_status)"
   [[ -n "$status" ]] || die "herdr agent get gave unexpected output"
-  [[ "$status" == idle || "$status" == done ]] \
+  [[ "$status" == idle || "$status" == "done" ]] \
     || die "worker $task is $status; prompt is only sent to a worker that has stopped (idle or done)"
 
   # Return as soon as the worker has started (or stopped at a dialog); herdr

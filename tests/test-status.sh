@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Tests for plugins/mcv/bin/mcv-status. Needs bash, jq; no herdr.
-# Run: tests/mcv/test-status.sh   (exit 0 when every check passes)
+# Tests for bin/mcv-status. Needs bash, jq; no herdr.
+# Run: tests/test-status.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-BIN="$(cd "$HERE/../../plugins/mcv/bin" && pwd -P)"
+BIN="$(cd "$HERE/../bin" && pwd -P)"
 S="$BIN/mcv-status"
 
 pass=0
@@ -55,7 +55,7 @@ expect "second question is q2" '[[ "$q2" == q2 ]]' "got '$q2'"
 out="$("$S" note "halfway")"
 expect "note prints nothing" '[[ -z "$out" ]]' "$out"
 "$S" blocked "cannot reach the database" >/dev/null
-"$S" done "login fixed" >/dev/null
+"$S" "done" "login fixed" >/dev/null
 "$S" failed "tests will not run" >/dev/null
 expect "six lines written" '[[ $(wc -l <"$log") -eq 6 ]]' "$(cat "$log")"
 

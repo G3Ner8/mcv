@@ -167,8 +167,9 @@ case "${1:-}" in
     qid="$4"
     [[ "$qid" =~ ^q[1-9][0-9]*$ ]] || die "question id '$qid': expected q1, q2, ..."
     lock_log "$log"
-    [[ -f "$log" ]] && cut -f2,3 "$log" | grep -qxF "needs-decision"$'\t'"$qid" \
-      || die "no question $qid in task $2"
+    if [[ ! -f "$log" ]] || ! cut -f2,3 "$log" | grep -qxF "needs-decision"$'\t'"$qid"; then
+      die "no question $qid in task $2"
+    fi
     ! cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
       || die "question $qid in task $2 is already answered"
     append "$log" answered "$qid" "$5"

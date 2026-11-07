@@ -3,13 +3,13 @@
 # Tests for what a worker gets beyond its worktree: `spawn --context` (the
 # project folder opened with --add-dir) and `.worktreeinclude` (ignored files
 # copied from the main checkout), plus a project whose path has spaces.
-# Runs against tests/mcv/fixtures/fake-herdr.sh. Needs bash, git and jq.
-# Run: tests/mcv/test-context.sh   (exit 0 when every check passes)
+# Runs against tests/fixtures/fake-herdr.sh. Needs bash, git and jq.
+# Run: tests/test-context.sh   (exit 0 when every check passes)
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-H="$(cd "$HERE/../../plugins/mcv/bin" && pwd -P)/mcv-herdr.sh"
+H="$(cd "$HERE/../bin" && pwd -P)/mcv-herdr.sh"
 
 pass=0
 fail=0
