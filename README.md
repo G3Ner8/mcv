@@ -56,12 +56,18 @@ This repository is its own marketplace. While it is private, the machine needs g
 
 In a Claude Code session started inside a herdr pane, in your project's folder, type `/mcv` (the
 slash menu shows it as `/mcv:mcv`). The first time, the coordinator checks herdr, proposes a project
-config, and writes `.claude/mcv.json` once you agree:
+config, and writes `.claude/mcv.json` once you agree. The examples in this README follow one
+made-up project, Brewly, a coffee shop's ordering system: a folder `~/code/brewly` with its own
+`CLAUDE.md` and `plans/`, holding three repositories, `web` (the customer ordering site), `api`
+(orders and menu) and `staff` (the baristas' order queue). Started in `~/code/brewly`, the
+coordinator proposes:
 
 ```json
-{ "project":  "acme",
-  "repos":    { "admin": "admin", "storefront": "storefront" },
-  "dispatch": "{task}" }
+{ "project":  "brewly",
+  "repos":    { "web": "web", "api": "api", "staff": "staff" },
+  "dispatch": "{task}",
+  "base":     "origin/develop",
+  "context":  "." }
 ```
 
 `project` is a short name that prefixes every worker; `repos` are the repositories workers may be
@@ -75,10 +81,10 @@ Optional fields:
   repositories. See [What a worker has](#what-a-worker-has).
 - `max_workers` (default 2): how many workers run at once; the coordinator queues the rest.
 
-Then ask for work in plain words ("fix the login redirect in admin, and add a CSV export"). Before
-starting anything, the coordinator shows each worker it plans, with its task id, repo and branch, and
-waits for your yes. Questions arrive labelled by task, for example `login-fix #1`; answer in plain
-words. The coordinator never answers a worker's question or approves a worker's dialog for you.
+Then ask for work in plain words ("the cart total in web ignores the oat-milk surcharge, fix it; and
+add a CSV export of loyalty points to api"). Before starting anything, the coordinator shows each
+worker it plans, with its task id, repo and branch, and waits for your yes. Questions arrive
+labelled by task, for example `cart-fix #1`; answer in plain words. The coordinator never answers a worker's question or approves a worker's dialog for you.
 
 ## Run the helper by hand
 
@@ -96,16 +102,17 @@ after `!` in Claude Code. Below, `H` stands for that path.
 
 ```
 H doctor                                     # herdr, its server, the integration, jq
-H spawn shop t1 ~/code/shop fix/login        # new worktree on new branch fix/login, idle Claude in it
-H prompt shop/t1 "Fix the login redirect bug"
-H read shop/t1                               # what the worker said
+H spawn brewly cart-fix ~/code/brewly/web fix/cart-total
+                                             # new worktree on new branch fix/cart-total, idle Claude in it
+H prompt brewly/cart-fix "The cart total ignores the oat-milk surcharge; fix it"
+H read brewly/cart-fix                       # what the worker said
 H agents                                     # every herdr agent and its state
-H remove shop/t1                             # close it; the branch is kept
+H remove brewly/cart-fix                     # close it; the branch is kept
 ```
 
 Run `H` with no arguments for every command and option.
 
-- `shop` is a **project** name and `t1` a **task id**; you choose both. Use lowercase letters, digits,
+- `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.
 - `spawn` needs a branch name that does not exist yet, locally or on a remote; `main`, `master` and
   `develop` are always refused. It fetches first, then starts the branch from the remote's default
@@ -158,11 +165,12 @@ committed on its base branch and nothing else.
 | Files git ignores (`.env`, `qa/.env`, the repo's own `CLAUDE.local.md`) | only those listed in the repo's `.worktreeinclude` (below) |
 | `node_modules` and other installed dependencies | no: the worker installs them (`npm ci` and the like) |
 | The project folder around the repo: its `CLAUDE.md`, `CLAUDE.local.md`, skills, plans | only with `context` in the config (below) |
-| A path that leaves the repo, such as `../other-repo` | no: from a worktree it points elsewhere; the coordinator gives such paths in full in the task |
+| A path that leaves the repo, such as `../api/openapi.yaml` written in `web`'s notes | no: from a worktree it points elsewhere; the coordinator gives such paths in full in the task |
 | `.claude/settings.local.json` (permissions you allowed locally) | only if listed in `.worktreeinclude` |
 
 **`.worktreeinclude`.** A file at the repo's root, in `.gitignore` syntax, naming ignored files to
-copy into every new worktree from the main checkout, for example:
+copy into every new worktree from the main checkout. Brewly's `web` keeps a test customer's login
+for its browser checks in an ignored `qa/.env`, so its `.worktreeinclude` reads:
 
 ```
 qa/.env
@@ -178,7 +186,8 @@ Code reads for its own worktrees, so one list serves both. It is for a few small
 
 **`context`.** When `.claude/mcv.json` sits in a folder that holds several repositories, a worker
 in one of them loses that folder's `CLAUDE.md`, `CLAUDE.local.md` and skills, because its worktree
-lives elsewhere. With `"context": "."` the worker is started with that folder added (Claude's
+lives elsewhere: a worker in `brewly/web` would not see `brewly/CLAUDE.md` or `brewly/plans/`.
+With `"context": "."` the worker is started with that folder added (Claude's
 `--add-dir`, with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`), so it reads them as a session
 opened in the repo's own folder would. `--add-dir` would also let it edit there, so the worker's
 settings deny Claude's file-editing tools anywhere in that folder (checked: an edit there is
@@ -198,7 +207,7 @@ watching them.
 To make a worker ask before acting, pass Claude's own flag after `--`:
 
 ```
-H spawn shop t1 ~/code/shop fix/login -- --permission-mode default
+H spawn brewly cart-fix ~/code/brewly/web fix/cart-total -- --permission-mode default
 ```
 
 In 0.1.0 such a worker stops in the `blocked` state at each approval dialog, and the helper cannot

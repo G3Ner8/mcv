@@ -434,11 +434,11 @@ cmd_spawn() {
   lc="$(lower "$branch")"
   case "$lc" in
     main|master|develop) die "'$branch' is a shared branch; give the worker a new branch name" ;;
-    refs/*|head|head/*) die "'$branch' is not a usable branch name; give a plain name such as fix/login" ;;
+    refs/*|head|head/*) die "'$branch' is not a usable branch name; give a plain name such as fix/cart-total" ;;
   esac
   for r in $(git -C "$root" remote); do
     [[ "$lc" != "$(lower "$r")"/* ]] \
-      || die "'$branch' starts with the remote name $r; give a plain name such as fix/login"
+      || die "'$branch' starts with the remote name $r; give a plain name such as fix/cart-total"
   done
   r="$(branch_taken "$root" "$lc")" \
     && die "branch '$branch' already exists as ${r#refs/} in $root; give the worker a new branch name"

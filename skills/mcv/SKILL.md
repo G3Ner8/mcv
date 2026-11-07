@@ -84,10 +84,11 @@ Skip this skill for:
 1. **Pick the repo.** If the user named it, use it. Otherwise infer it from the task (a file path,
    an app name, an issue that names the app). If it is still unclear, ask in one line, with your
    best guess first.
-2. **Name the task.** Pick a short id from the work itself (`login-fix`, `export-csv`): lowercase,
+2. **Name the task.** Pick a short id from the work itself (`cart-fix`, `loyalty-csv`): lowercase,
    digits and `-`, unique in this project, and short enough that `<project>-<id>` is at most 32
    characters. Pick a new branch name following the project's own convention if its CLAUDE.md or
-   CONTRIBUTING has one, else `fix/<id>` for a fix and `feat/<id>` for anything else.
+   CONTRIBUTING has one, else `fix/<what>` for a fix and `feat/<what>` for anything else
+   (`fix/cart-total`, `feat/loyalty-csv`).
 3. **Write the task so the worker can do it without you.** The worker sees its own repo, plus the
    `context` folder if the config has one, and nothing of this conversation. Put in the task text
    the facts it needs that it cannot find there: a decision the user made, an endpoint and its
@@ -103,9 +104,9 @@ Skip this skill for:
 
    ```
    Starting 2 workers, 1 waiting:
-     login-fix    -> admin, branch fix/login        task: fix the redirect after login
-     export-csv   -> admin, branch feat/export-csv  task: add a CSV export button
-     order-pdf    -> admin, branch feat/order-pdf   (waits for one of the above)
+     cart-fix     -> web, branch fix/cart-total     task: add the oat-milk surcharge to the cart total
+     loyalty-csv  -> api, branch feat/loyalty-csv   task: export loyalty points as CSV
+     receipt-pdf  -> api, branch feat/receipt-pdf   (waits for one of the above)
    OK? (names can be changed)
    ```
 5. **Start each worker.** `BIN/mcv-herdr.sh spawn <project> <id> <repo path> <branch>`, adding
@@ -151,9 +152,9 @@ for what it said last, tell the user, and offer `remove`.
 workers in the same repo never look alike. Keep the worker's recommendation if it gave one.
 
 ```
-login-fix #1 (admin, fix/login)
-  Keep the redirect URL in the session or the query string?
-  Recommended: session, since the client can edit the query string.
+cart-fix #1 (web, fix/cart-total)
+  Add the surcharge per drink, or once per order?
+  Recommended: per drink, since that is how the till prints it on the receipt.
 ```
 
 In this version every question goes to the user. Do not answer one yourself, even when you think
