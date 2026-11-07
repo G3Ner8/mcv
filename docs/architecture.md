@@ -64,7 +64,9 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    with `mcv-status --task ... answered`. If the worker is still busy, the coordinator records the
    answer as `pending` instead, and the watcher prints it back as `deliver` when the worker stops.
 5. **Remove** (`mcv-herdr.sh remove`), when the user agrees: refuse a dirty worktree, remove it
-   through herdr (or git, if the workspace is already gone), delete the task state. The branch stays.
+   through herdr (or git, if the workspace is already gone), delete the task state, then the
+   project's state folder and herdr's per-repository folder if they are left empty. The branch
+   stays.
 
 ## State
 

@@ -157,5 +157,21 @@ echo x >"$wt/new-file"
 out="$("$H" remove a-b/c 2>&1)"; rc=$?
 expect "remove refuses a dirty worktree" '[[ $rc -eq 1 && "$out" == *uncommitted* && -f "$wt/new-file" ]]' "rc=$rc $out"
 
+# remove leaves no empty folders of its own behind: the project's state
+# folder once its last task is gone, and herdr's per-repository worktree
+# folder once its last worktree is. A folder that still holds something stays.
+out="$(FAKE_DIR="$root/fake2" "$H" spawn solo s1 "$repo" fix/s1 2>&1)"; rc=$?
+wt="$(jq -r .worktree "$(meta solo s1)")"
+expect "spawn solo/s1 succeeds" '[[ $rc -eq 0 && -d "$wt" ]]' "rc=$rc $out"
+out="$(FAKE_DIR="$root/fake2" "$H" remove solo/s1 2>&1)"; rc=$?
+expect "remove of a project's last task succeeds" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+expect "the project's empty state folder is gone" '[[ ! -e "$MCV_HOME/solo" ]]'
+expect "herdr's empty per-repository folder is gone" '[[ ! -e "$(dirname "$wt")" ]]'
+expect "another project's state is untouched" '[[ -d "$MCV_HOME/acme/tasks" ]]'
+out="$("$H" spawn solo s2 "$repo" fix/s2 2>&1)"
+wt="$(jq -r .worktree "$(meta solo s2)")"
+"$H" remove solo/s2 >/dev/null 2>&1
+expect "herdr's folder that still holds other worktrees stays" '[[ -d "$(dirname "$wt")" ]]'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

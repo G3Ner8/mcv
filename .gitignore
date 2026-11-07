@@ -1,1 +1,6 @@
 .DS_Store
+
+# Personal Claude Code files: each person's own, never part of the plugin.
+.claude/mcv.json
+.claude/settings.local.json
+CLAUDE.local.md
