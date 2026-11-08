@@ -63,14 +63,16 @@
 #       two calls to see whether anything changed), and the agent name (mcv
 #       workers are named <project>-<id>; "-" when unnamed).
 #   remove <project>/<id>
-#       Close the worker, delete its worktree folder and the task's mcv state.
+#       Close the worker, delete its worktree folder and the task's mcv state,
+#       after copying the task's meta, status log and transcript paths to
+#       <project>/history/<id>-<UTC time>/ (printed as "history").
 #       Refused while the worker is working or at a dialog, and while the
 #       worktree has uncommitted or untracked files, or git cannot read it;
 #       ignored files are deleted with it. The branch is kept, as a local
 #       branch; push it first if you need it. The workspace herdr opened for
 #       the repository's main checkout stays open; close it in herdr. Folders
-#       left empty (the project's state, herdr's folder for the repository)
-#       are removed.
+#       left empty (the project's tasks folder, herdr's folder for the
+#       repository) are removed.
 #       Also works after the user has closed the worker's herdr workspace.
 #
 # <project> and <id>: lowercase letters, digits, - and _; <project> starts with
@@ -80,7 +82,10 @@
 # Output: one JSON object, except `read` and `agents`. Errors: one line on
 # stderr, "mcv-herdr: <command>: <reason>", exit 1. Unknown command: this text,
 # exit 2. Task state: ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/meta
-# (a relative MCV_HOME is taken from the current folder).
+# (a relative MCV_HOME is taken from the current folder). spawn, prompt and
+# remove add a line to <project>/journal.log, done or refused:
+#   <UTC time>\t<command>\t<project>/<id>\tok: <what> | error: <reason>
+# (prompt logs the length of the text, not the text).
 
 # For maintainers: this is the only file in mcv that calls herdr. Every other
 # mcv file goes through it, so a change in herdr's CLI is fixed here alone.
@@ -96,7 +101,25 @@ PROJECT_RE='^[a-z][a-z0-9_-]*$'
 ID_RE='^[a-z0-9][a-z0-9_-]*$'
 CMD="${1:-}"
 
-die() { printf 'mcv-herdr: %s: %s\n' "${CMD:-usage}" "$*" >&2; exit 1; }
+die() { printf 'mcv-herdr: %s: %s\n' "${CMD:-usage}" "$*" >&2; journal "error: $*"; exit 1; }
+
+# The project's journal: one line per spawn, prompt and remove, done or
+# refused, so a problem in a real run can be looked at afterwards. JTASK is
+# set once the command has a checked task name; before that nothing is
+# written. Only spawn may create the project's folder for it, so a mistyped
+# project name leaves nothing behind. A line is short and appended in one
+# write, so writers need no lock.
+JTASK=""
+JNEW=""
+journal() {
+  [[ -n "$JTASK" ]] || return 0
+  local d="$MCV_HOME/${JTASK%%/*}"
+  [[ -d "$d" || -n "$JNEW" ]] || return 0
+  mkdir -p "$d" 2>/dev/null || return 0
+  printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CMD" "$JTASK" \
+    "$(printf '%s' "$1" | tr '\t\r\n' '   ' | LC_ALL=C tr -d '\000-\037\177')" \
+    >>"$d/journal.log" 2>/dev/null || true
+}
 
 need_herdr_pane() {
   [[ "${HERDR_ENV:-}" == 1 ]] \
@@ -448,6 +471,9 @@ cmd_spawn() {
   [[ $# -ge 4 ]] || die "usage: spawn <project> <id> <repo-path> <new-branch> [--base <ref>] [--context <folder>] [-- <claude-args>...]"
   local project="$1" id="$2" repo="$3" branch="$4" base="" context=""
   shift 4
+  # Sound names go in the journal from the start, refusals included; the
+  # names are checked again, with their own messages, below.
+  if [[ "$project" =~ $PROJECT_RE && "$id" =~ $ID_RE ]]; then JTASK="$project/$id"; JNEW=1; fi
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --base)
@@ -706,6 +732,7 @@ cmd_spawn() {
     -- ${ctx_args[@]+"${ctx_args[@]}"} --settings "$settings" ${1+"$@"} >/dev/null
   rm -f "$dir/starting"
 
+  journal "ok: branch $branch from ${base:-HEAD}, worktree $wt${context:+, context $context}"
   jq -c '{task, agent, worktree, branch, base, context, copied}' "$dir/meta"
 }
 
@@ -733,6 +760,7 @@ cmd_prompt() {
 
   local d name status
   d="$(task_dir "$task")" || exit 1
+  JTASK="$task"
   name="$(jfield "$(cat "$d/meta")" .agent)"
   [[ -n "$name" ]] || die "task $task has a damaged meta file ($d/meta)"
   # When Claude exits in its pane, herdr either drops the agent
@@ -773,6 +801,8 @@ cmd_prompt() {
   # through by the user has started after all.
   rm -f "$d/starting"
   status="$(jfield "$HOUT" .result.agent.agent_status)"
+  # The text itself is in the worker's transcript; its length is enough here.
+  journal "ok: sent ${#text} characters, state ${status:-unknown}"
   jq -cn --arg s "${status:-unknown}" '{state: $s}'
 }
 
@@ -799,11 +829,21 @@ cmd_agents() {
     <<<"$out" 2>/dev/null || die "herdr agent list gave unexpected output"
 }
 
+# Copy a task's record from its folder $1 into a new folder $2.
+keep_history() {
+  mkdir -p "$2" 2>/dev/null || return 1
+  local f
+  for f in meta status.log transcripts; do
+    [[ ! -f "$1/$f" ]] || cp -p "$1/$f" "$2/" 2>/dev/null || return 1
+  done
+}
+
 cmd_remove() {
   need_herdr_pane
   [[ $# -eq 1 ]] || die "usage: remove <project>/<id>"
   local dir m wt ws branch repo
   dir="$(task_dir "$1")" || exit 1
+  JTASK="$1"
   m="$(cat "$dir/meta")"
   wt="$(jfield "$m" .worktree)"
   ws="$(jfield "$m" .workspace_id)"
@@ -841,14 +881,24 @@ cmd_remove() {
       git -C "$repo" worktree prune 2>/dev/null || true
     fi
   fi
+  # The task's record outlives it: its meta, status log and the paths of
+  # its worker's transcripts, for looking back at a run. If they cannot be
+  # kept, the task's state stays where it is.
+  local hist
+  hist="$MCV_HOME/${1%%/*}/history/${1#*/}-$(date -u +%Y%m%dT%H%M%SZ)"
+  [[ ! -e "$hist" ]] || hist="$hist-$$"
+  keep_history "$dir" "$hist" \
+    || die "the worktree is removed, but the task's record could not be copied to $hist; its state stays at $dir"
   rm -rf "$dir"
   # Folders this task's creation left that are now empty: the project's
-  # state folder after its last task, and herdr's per-repository worktree
+  # tasks folder after its last task, and herdr's per-repository worktree
   # folder after its last worktree. rmdir removes only an empty folder, so
-  # one still in use (another task, a running watcher's lock) stays.
-  rmdir "$(dirname "$dir")" "$(dirname "$(dirname "$dir")")" 2>/dev/null || true
+  # one still in use (another task) stays, and so does the project's
+  # folder, which holds its journal and history.
+  rmdir "$(dirname "$dir")" 2>/dev/null || true
   rmdir "$(dirname "$wt")" 2>/dev/null || true
-  jq -cn --arg b "$branch" '{removed: true, branch_kept: $b}'
+  journal "ok: branch $branch kept, history $hist"
+  jq -cn --arg b "$branch" --arg h "$hist" '{removed: true, branch_kept: $b, history: $h}'
 }
 
 case "$CMD" in

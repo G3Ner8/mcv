@@ -4,11 +4,11 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.1.3"
+  version: "0.2.0"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
-  scope: writes files — git worktrees and branches (through herdr), task state under ~/.claude/mcv/<project>/, and .claude/mcv.json on first use (plus a line in .git/info/exclude if the user agrees); starts Claude Code sessions
+  scope: writes files — git worktrees and branches (through herdr), task state, a journal and task history under ~/.claude/mcv/<project>/, and .claude/mcv.json on first use (plus a line in .git/info/exclude if the user agrees); starts Claude Code sessions
 ---
 
 # mcv — the coordinator
@@ -97,8 +97,20 @@ Skip this skill for:
    `.gitignore` for this. If a repo has files the workers need that git ignores (a test account's
    `.env`, say), tell the user they can list them in a `.worktreeinclude` file at that repo's root
    (`.gitignore` syntax); `spawn` copies them into each worktree.
+
+   Then tell the user in one line which permission mode workers will run in. A worker takes it
+   from the Claude Code settings files, not from this session's flags: read
+   `permissions.defaultMode` in `~/.claude/settings.json`, then the repo's `.claude/settings.json`
+   and `.claude/settings.local.json` (a later file wins, except that `auto` and
+   `bypassPermissions` count only from `~/.claude/settings.json`; none means `default`). If it is
+   `auto` or `bypassPermissions`, say workers will act without asking anyone, and that mcv refuses only their
+   git commands that reach past their own branch. To have a worker ask first, start it with
+   `-- --permission-mode default`; it then stops at each approval, which the user answers in its
+   herdr pane.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
-   tool: `BIN/mcv-watch <project>`. Never start a second one for the same project. If it exits at
+   tool: `BIN/mcv-watch <project>`. The Monitor tool ends it after a while (30 minutes, seen in
+   use); while workers are still active, start it again, which shows the open questions again
+   (relay none twice). Never start a second one for the same project. If it exits at
    once saying a watcher is already running, check your Monitor tasks: if that one is yours, keep
    using it; if not, another session is watching this project, so tell the user, with the pid the
    message gives, and let them choose to stop it (`kill <pid>`) or work from that session.
@@ -158,7 +170,9 @@ Skip this skill for:
 7. Tell the user the workers are running, and carry on with the conversation. The watcher wakes you.
 
 The worker's own rules (how to ask, git rules, staying in its worktree) reach it through mcv's
-hooks. Do not repeat them in the task text.
+hooks. Do not repeat them in the task text. A hook also refuses a worker's git command that pushes
+to another branch, force-pushes, or deletes or moves another branch or a tag; the worker is told to
+ask instead, so such a need comes to you as a question like any other.
 
 ### Handling what the watcher reports
 
@@ -232,7 +246,8 @@ Report per worker: id, repo and branch, state, open questions.
 ## Rollback
 
 - A worker: `BIN/mcv-herdr.sh remove <project>/<id>`, only when the user agrees. It closes the
-  worker, deletes its worktree folder and task state, and keeps the branch as a local branch. It
+  worker, deletes its worktree folder and task state, and keeps the branch as a local branch and
+  the task's record in the folder it prints as `history`. It
   refuses while the worker is working or at a dialog, and while the worktree has uncommitted or
   untracked files; then tell the user, whose call it is.
 - The config: delete `.claude/mcv.json`.
@@ -244,5 +259,10 @@ Report per worker: id, repo and branch, state, open questions.
   dialog on its screen, and never type into its pane other than through `prompt`.
 - Never remove a worker, delete a branch, push or merge on a worker's behalf unless the user asks.
 - Exactly one watcher per project per session. Every event wakes you, so act on it and stay brief.
+- Keep the journal. The helpers already log every `spawn`, `prompt` and `remove` in
+  `$MCV_HOME/<project>/journal.log`. Add a line yourself when something did not go as this skill
+  says: a step that took more than one try, an event you could not place, a worker that needed
+  help it should not have, the watcher ending and being restarted. `BIN/mcv-status --journal
+  <project>[/<id>] "<what happened, in one line>"`. Facts only; it is read later to fix mcv.
 - Keep herdr running while workers run. Whether workers survive when every herdr window is closed
   is untested.

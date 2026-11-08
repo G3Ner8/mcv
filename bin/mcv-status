@@ -19,11 +19,27 @@
 #   mcv-status --task <project>/<id> pending <question-id> <text>
 # (both refused when MCV_TASK is set: a worker never closes its own questions)
 #
+# The coordinator adds a line to the project's journal, next to the ones
+# mcv-herdr.sh writes, for something worth looking at after the run
+# (refused for a worker, which reports with note):
+#   mcv-status --journal <project>[/<id>] <text>
+# into ${MCV_HOME:-~/.claude/mcv}/<project>/journal.log as
+#   <UTC time>\tnote\t<project>/<id> or -\t<text, cleaned as below>
+#
 # mcv's hooks call:
 #   mcv-status --contract              SessionStart: the rules a worker follows;
-#                                      also leaves <task>/rules-loaded
+#                                      also leaves <task>/rules-loaded, and adds
+#                                      the session's transcript path to
+#                                      <task>/transcripts
 #   mcv-status --deny-ask              PreToolUse on AskUserQuestion: refuse it
-# Both print nothing and exit 0 unless MCV_TASK names a task that exists.
+#   mcv-status --guard-git             PreToolUse on Bash: refuse a git command
+#                                      that pushes to a branch other than the
+#                                      worker's, force-pushes (--force-with-lease
+#                                      only on its own branch), or deletes or
+#                                      moves another branch or a tag; reads the
+#                                      command's text, so a script or alias
+#                                      gets past it
+# Each prints nothing and exits 0 unless MCV_TASK names a task that exists.
 #
 # Each event is one line in ${MCV_HOME:-~/.claude/mcv}/<project>/tasks/<id>/status.log:
 #   <UTC time>\t<kind>\t<question id or ->\t<text, tabs and newlines turned into spaces,
@@ -204,14 +220,234 @@ Git, everything else: follow this project's own git rules (CLAUDE.md, CONTRIBUTI
 EOF
 }
 
+# The git guard. The worker's git rules are text in its context; a worker in
+# auto mode runs them unattended, and every worktree shares the repository's
+# refs, so a slip (a push to develop, a branch -D) reaches the user's own
+# branches. This checks each Bash command for the few git commands that reach
+# past the worker's branch and refuses them before they run.
+#
+# It reads the command's text, split at ; & | ( ) ` { } and newlines, with
+# quotes dropped, and looks at each piece that starts with git. It catches
+# mistakes, not a worker set on getting around it: a script, an alias or a
+# variable hides the command from it. A quoted message holding such a command
+# ("git commit -m 'then git push -f'") is refused too; reword it.
+
+# Print why the git command in words $3... must not run, or nothing. $1 is
+# the folder it runs in, $2 the worker's branch.
+git_reason() {
+  local dir="$1" own="$2"
+  shift 2
+  while [[ $# -gt 0 && ( "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*= || "$1" == env || "$1" == command \
+    || "$1" == exec || "$1" == sudo || "$1" == nohup ) ]]; do shift; done
+  [[ $# -gt 0 && ( "$1" == git || "$1" == */git ) ]] || return 0
+  shift
+  while [[ $# -gt 0 && "$1" == -* ]]; do
+    case "$1" in
+      -C)
+        if [[ "${2:-}" == /* ]]; then dir="${2:-}"; else dir="$dir/${2:-}"; fi
+        shift 2 || return 0 ;;
+      -c|--git-dir|--work-tree|--namespace|--config-env) shift 2 || return 0 ;;
+      *) shift ;;
+    esac
+  done
+  local sub="${1:-}"
+  shift || true
+  case "$sub" in
+    push)       push_reason "$dir" "$own" "$@" ;;
+    branch)     branch_reason "$own" "$@" ;;
+    tag)        tag_reason "$@" ;;
+    update-ref) update_ref_reason "$own" "$@" ;;
+    checkout|switch) reset_branch_reason "$own" "$@" ;;
+  esac
+}
+
+# The branch checked out in folder $1, or nothing (not a repository, or a
+# detached HEAD, where git refuses a push of HEAD by itself).
+current_branch() { git -C "$1" branch --show-current 2>/dev/null || true; }
+
+push_reason() {
+  local dir="$1" own="$2" force="" del="" w
+  shift 2
+  local -a pos=()
+  while [[ $# -gt 0 ]]; do
+    w="$1"
+    case "$w" in
+      --force|--force-if-includes) force=1 ;;
+      --force-with-lease|--force-with-lease=*) ;;
+      --delete) del=1 ;;
+      --all|--branches|--mirror|--tags)
+        printf '%s pushes every branch or tag, not only your branch' "$w"; return ;;
+      --prune) printf -- '--prune deletes branches on the remote'; return ;;
+      -o|--push-option|--repo|--receive-pack|--exec) shift ;;
+      --) shift; pos+=("$@"); break ;;
+      --*) ;;
+      -*)
+        [[ "$w" != *f* ]] || force=1
+        [[ "$w" != *d* ]] || del=1 ;;
+      *) pos+=("$w") ;;
+    esac
+    shift
+  done
+  [[ -z "$force" ]] || { printf 'never force-push; on your own branch use --force-with-lease'; return; }
+  local cur
+  # No refspec: git pushes the branch checked out there.
+  if [[ ${#pos[@]} -le 1 ]]; then
+    cur="$(current_branch "$dir")"
+    [[ -z "$cur" || "$cur" == "$own" ]] || printf 'this pushes %s, which is checked out there, not your branch' "$cur"
+    return
+  fi
+  local r src dst
+  for r in "${pos[@]:1}"; do
+    if [[ "$r" == +* ]]; then printf 'a + refspec (%s) force-pushes' "$r"; return; fi
+    if [[ -n "$del" ]]; then dst="$r"
+    elif [[ "$r" == *:* ]]; then src="${r%%:*}"; dst="${r#*:}"
+    else src="$r"; dst="$r"
+    fi
+    [[ -n "$dst" ]] || dst="$src"
+    if [[ "$dst" == HEAD || "$dst" == @ ]]; then
+      cur="$(current_branch "$dir")"
+      [[ -z "$cur" || "$cur" == "$own" ]] || { printf 'HEAD there is %s, not your branch' "$cur"; return; }
+      continue
+    fi
+    dst="${dst#refs/heads/}"
+    [[ "$dst" == "$own" ]] && continue
+    if [[ -n "$del" || "$r" == :* ]]; then printf 'this deletes %s on the remote' "$dst"
+    else printf 'this pushes to %s' "$dst"
+    fi
+    return
+  done
+}
+
+branch_reason() {
+  local own="$1" mode="" force="" remote="" w
+  shift
+  local -a names=()
+  while [[ $# -gt 0 ]]; do
+    w="$1"
+    case "$w" in
+      -d|-D|--delete) mode=delete ;;
+      -m|-M|--move) mode=move ;;
+      -C) mode=copy-force ;;
+      -f|--force) force=1 ;;
+      -r|--remotes) remote=1 ;;
+      -u|--set-upstream-to|--contains|--no-contains|--merged|--no-merged|--points-at|--sort|--format) shift ;;
+      --*) ;;
+      -*)
+        [[ "$w" != *[dD]* ]] || mode=delete
+        [[ "$w" != *[mM]* ]] || mode=move
+        [[ "$w" != *r* ]] || remote=1
+        [[ "$w" != *f* ]] || force=1 ;;
+      *) names+=("$w") ;;
+    esac
+    shift
+  done
+  local n
+  case "$mode" in
+    delete)
+      [[ -z "$remote" ]] || return 0
+      for n in ${names[@]+"${names[@]}"}; do
+        [[ "$n" == "$own" ]] || { printf 'this deletes branch %s' "$n"; return; }
+      done ;;
+    move) printf 'this renames a branch; mcv knows yours as %s' "$own" ;;
+    copy-force) printf 'branch -C overwrites the branch it copies to' ;;
+    *)
+      if [[ -n "$force" && ${#names[@]} -gt 0 && "${names[0]}" != "$own" ]]; then
+        printf 'this moves branch %s' "${names[0]}"
+      fi ;;
+  esac
+}
+
+tag_reason() {
+  local w
+  for w in "$@"; do
+    case "$w" in
+      -d|--delete) printf 'this deletes a tag'; return ;;
+      -f|--force) printf 'this moves a tag'; return ;;
+      --*) ;;
+      -*)
+        [[ "$w" != *d* ]] || { printf 'this deletes a tag'; return; }
+        [[ "$w" != *f* ]] || { printf 'this moves a tag'; return; } ;;
+    esac
+  done
+}
+
+update_ref_reason() {
+  local own="$1" w
+  shift
+  for w in "$@"; do
+    [[ "$w" == -* ]] && continue
+    [[ "$w" == "refs/heads/$own" || "$w" != refs/heads/* && "$w" != refs/tags/* ]] \
+      || printf 'this changes %s' "$w"
+    return
+  done
+}
+
+reset_branch_reason() {
+  local own="$1"
+  shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -B|-C|--force-create)
+        [[ "${2:-}" == "$own" ]] || printf 'this resets branch %s' "${2:-}"
+        return ;;
+    esac
+    shift
+  done
+}
+
+guard_git() {
+  local input cmd cwd own seg reason
+  input="$(cat)"
+  cmd="$(jq -r '.tool_input.command // empty' <<<"$input" 2>/dev/null || true)"
+  [[ "$cmd" == *git* ]] || return 0
+  cwd="$(jq -r '.cwd // empty' <<<"$input" 2>/dev/null || true)"
+  [[ -n "$cwd" ]] || cwd="$PWD"
+  own="$(jq -r '.branch // empty' "$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}/meta" 2>/dev/null || true)"
+  [[ -n "$own" ]] || return 0
+  cmd="${cmd//&&/$'\n'}"
+  cmd="${cmd//||/$'\n'}"
+  local c
+  for c in ';' '|' '&' '(' ')' '`' '{' '}'; do cmd="${cmd//"$c"/$'\n'}"; done
+  cmd="${cmd//\"/}"
+  cmd="${cmd//\'/}"
+  # Word splitting below must not expand a * in the command against this
+  # folder.
+  set -f
+  while IFS= read -r seg; do
+    # shellcheck disable=SC2086 # splitting the piece into words is the point
+    reason="$(git_reason "$cwd" "$own" $seg)"
+    [[ -z "$reason" ]] && continue
+    reason="mcv: refused, $reason. You work only on your branch $own. If the task needs this, ask the user: \"$SELF\" needs-decision \"<what and why>\"."
+    jq -cn --arg r "$reason" \
+      '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+    return 0
+  done <<<"$cmd"
+}
+
 case "${1:-}" in
+  --guard-git)
+    is_task "${MCV_TASK:-}" || exit 0
+    guard_git
+    ;;
+
   # A hook acts only for a real worker: MCV_TASK names a task spawn created.
   # Anything else (unset, malformed, a task already removed) is not a worker.
   --contract)
     is_task "${MCV_TASK:-}" || exit 0
     # Proof that this worker's Claude loaded mcv's hooks: prompt refuses a
     # worker without it, since that worker has none of the rules below.
-    : >"$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}/rules-loaded" 2>/dev/null || true
+    tdir="$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}"
+    : >"$tdir/rules-loaded" 2>/dev/null || true
+    # Claude gives the session's transcript path in the hook's input; remove
+    # keeps the list in the task's history. A resumed or cleared session
+    # starts a new transcript, so each new path is added once. A caller with
+    # a terminal for input is not Claude and sends none.
+    if [[ ! -t 0 ]]; then
+      tp="$(jq -r '.transcript_path // empty' 2>/dev/null || true)"
+      if [[ -n "$tp" ]] && ! grep -qxF "$tp" "$tdir/transcripts" 2>/dev/null; then
+        printf '%s\n' "$tp" >>"$tdir/transcripts" 2>/dev/null || true
+      fi
+    fi
     jq -cn --arg ctx "$(contract_text)" \
       '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
     ;;
@@ -240,6 +476,22 @@ case "${1:-}" in
     ! cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
       || die "question $qid in task $2 is already answered"
     append "$log" "$3" "$qid" "${*:5}"
+    ;;
+
+  --journal)
+    [[ $# -ge 3 ]] || usage "usage: --journal <project>[/<id>] <text>"
+    has_text "${*:3}" || usage "the journal line is empty; say what happened"
+    # Workers report through their own log; the journal is the coordinator's.
+    [[ -z "${MCV_TASK:-}" ]] || die "a worker cannot write the journal; report with note instead"
+    project="${2%%/*}"
+    [[ "$project" =~ ^[a-z][a-z0-9_-]*$ ]] || die "expected <project> or <project>/<id>, got '$2'"
+    task=-
+    if [[ "$2" == */* ]]; then
+      [[ "$2" =~ $TASK_RE ]] || die "expected <project> or <project>/<id>, got '$2'"
+      task="$2"
+    fi
+    mkdir -p "$MCV_HOME/$project" || die "cannot create $MCV_HOME/$project"
+    append "$MCV_HOME/$project/journal.log" note "$task" "${*:3}"
     ;;
 
   needs-decision|blocked|done|failed|note)

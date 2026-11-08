@@ -24,7 +24,7 @@ and pass the same flag to the workers you start by hand: `bin/mcv-herdr.sh spawn
 ```
 .claude-plugin/   plugin.json (the plugin) and marketplace.json (this repo is its own marketplace)
 skills/mcv/       SKILL.md, the coordinator's procedure
-hooks/            hooks.json; both hooks do nothing unless MCV_TASK names a task
+hooks/            hooks.json; every hook does nothing unless MCV_TASK names a task
 bin/              mcv-herdr.sh (the only file that calls herdr), mcv-status, mcv-watch
 tests/            test-*.sh, run.sh, fixtures/ (fake-herdr.sh, stub-herdr.sh)
 docs/             architecture.md, adr/ (decision records)
