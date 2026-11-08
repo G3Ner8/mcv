@@ -164,7 +164,8 @@ would: `mcv-watch <project>` (next to `H`) prints each question and stop as it h
   (build output, dependencies, a local `.env`) are deleted with the worktree. The branch stays as a
   local branch; push it first if you need it elsewhere. It also works after you have closed the
   worker's herdr workspace yourself. The workspace herdr opened for the repository's main checkout
-  stays open; close it in herdr when you no longer need it.
+  stays open; close it in herdr when you no longer need it. Before deleting the task's state it
+  copies the task's record to `~/.claude/mcv/<project>/history/` (see "What mcv writes").
 - `prompt` refuses a worker that has not received mcv's rules (below), since it would never
   report its questions. Usually it is still at the folder trust dialog: pick "Yes" there and
   prompt again. Otherwise its Claude did not load the mcv plugin, which happens when mcv is
@@ -263,6 +264,15 @@ Always, whatever the project says:
 - never force-push (`--force-with-lease` on its own branch only);
 - never commit secrets.
 
+The first two are also enforced. A hook checks each shell command a worker runs and refuses, before
+it runs, a git command that pushes to any branch but the worker's own, force-pushes, or deletes or
+moves another branch or a tag (`git push origin develop`, `git push -f`, `git branch -D main`,
+`git tag -d v1.0`). The worker is told why and to ask you instead. This matters because a worker
+in auto mode runs unattended, and every worktree shares the repository's branches with your own
+checkout. The hook reads the command's text, so it catches mistakes, not a worker set on getting
+around it: a script or an alias hides the command. For a branch that must never be pushed to,
+protect it on the server as well.
+
 Everything else follows the project's own git rules (its `CLAUDE.md` or `CONTRIBUTING`), which win.
 Where a project says nothing, the worker uses common practice: small Conventional Commits, the
 project's tests and linters before committing, a rebase onto the latest base branch, and at the end a
@@ -288,7 +298,13 @@ to push without being told, workers will not push.
 - **In each repository's git:** a branch per worker, which `remove` keeps; and `origin/HEAD`, which
   `spawn` sets from the remote (`git remote set-head --auto`, as `git clone` does).
 - **Elsewhere on your machine:** task state in `~/.claude/mcv/`, worktrees in `~/.herdr/worktrees/`.
-  `remove` deletes both, and the folders it leaves empty.
+  `remove` deletes both, and the folders it leaves empty, but keeps the task's record (below).
+- **A record of each run,** in `~/.claude/mcv/<project>/`, kept until you delete it: `journal.log`,
+  one line per `spawn`, `prompt` and `remove`, done or refused with the reason, plus notes the
+  coordinator adds when something goes wrong; and `history/<task>-<time>/`, where `remove` copies
+  the task's details, its status log and the paths of its worker's Claude session logs. Look there
+  when a run went wrong. The session logs themselves stay Claude Code's, which deletes them after
+  `cleanupPeriodDays` in your settings (30 days unless set), so an older path may point at nothing.
 - **Left behind, not mcv's to delete:** the herdr workspace opened for a repository's main
   checkout, and each worker's Claude session log in `~/.claude/projects/`.
 

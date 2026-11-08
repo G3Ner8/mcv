@@ -94,6 +94,7 @@ case "${1:-} ${2:-}" in
     # Claude with the mcv plugin loaded runs its SessionStart hook, with the
     # env that --settings carries.
     if [[ "${FAKE_NOHOOKS:-}" != 1 ]]; then
+      agent="$3"
       settings=""
       while [[ $# -gt 0 ]]; do
         [[ "$1" == --settings ]] && { settings="$2"; break; }
@@ -101,8 +102,10 @@ case "${1:-} ${2:-}" in
       done
       src="${BASH_SOURCE[0]}"
       [[ ! -L "$src" ]] || src="$(readlink "$src")"
+      # with the hook input Claude gives (measured with Claude Code 2.1).
       MCV_TASK="$(jq -r .env.MCV_TASK <<<"$settings")" MCV_HOME="$(jq -r .env.MCV_HOME <<<"$settings")" \
-        "$(dirname "$src")/../../bin/mcv-status" --contract >/dev/null
+        "$(dirname "$src")/../../bin/mcv-status" --contract >/dev/null \
+        <<<"{\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"transcript_path\":\"$D/transcripts/$agent.jsonl\"}"
     fi
     echo '{"result":{}}'
     ;;

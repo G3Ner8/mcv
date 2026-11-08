@@ -4,6 +4,33 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-11-08
+
+### Added
+
+- A git guard for workers: a PreToolUse hook on Bash refuses, before it runs, a git command that
+  pushes to a branch other than the worker's own, force-pushes (`--force-with-lease` passes on
+  its own branch), pushes every branch or tag, or deletes or moves another branch or a tag. The
+  worker is told why and to ask through `needs-decision`. Until now these rules were only text in
+  the worker's context, which a worker in auto mode follows unattended. It reads the command's
+  text, so it stops mistakes, not a determined worker. Checked with a real Claude worker: `git tag
+  -d` was refused before it ran.
+- A journal per project, `~/.claude/mcv/<project>/journal.log`: one line for each `spawn`,
+  `prompt` and `remove`, done or refused with the reason, and notes the coordinator adds with
+  `mcv-status --journal` when something does not go as the skill says.
+- Task history: `remove` copies the task's meta, status log and the worker's Claude transcript
+  paths to `~/.claude/mcv/<project>/history/<id>-<time>/` before deleting its state, and prints
+  the folder. The SessionStart hook records each transcript path from Claude's hook input.
+- The coordinator tells the user, when it writes the config, which permission mode workers will
+  run in and how to make them ask first.
+
+### Changed
+
+- `remove` keeps the project's folder in `~/.claude/mcv/`, which now holds its journal and history;
+  it still removes the `tasks` folder when it is left empty.
+- The skill says to restart the watcher when the Monitor tool ends it (after 30 minutes, seen in
+  use).
+
 ## [0.1.3] - 2026-11-07
 
 ### Fixed

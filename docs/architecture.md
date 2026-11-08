@@ -27,10 +27,10 @@ relies on. Why it is built this way is in the decision records, [docs/adr/](adr/
 | Part | Job | Talks to |
 |---|---|---|
 | `skills/mcv/SKILL.md` | The coordinator's procedure: config, dispatch, relaying questions, sending answers, cleanup. | the user; the three scripts |
-| `bin/mcv-herdr.sh` | Every herdr call: `doctor`, `spawn`, `prompt`, `read`, `agents`, `remove`. Owns task state. | herdr, git |
-| `bin/mcv-status` | A worker's reports, the coordinator's answers, and the text the hooks give a worker. | the status log |
+| `bin/mcv-herdr.sh` | Every herdr call: `doctor`, `spawn`, `prompt`, `read`, `agents`, `remove`. Owns task state; journals each spawn, prompt and remove. | herdr, git |
+| `bin/mcv-status` | A worker's reports, the coordinator's answers and journal notes, the text the hooks give a worker, and the git guard. | the status log, the journal |
 | `bin/mcv-watch` | One event stream for the Monitor tool: new log lines and worker state changes worth a coordinator turn. | status logs; `mcv-herdr.sh agents` |
-| `hooks/hooks.json` | SessionStart gives a worker its rules; PreToolUse refuses AskUserQuestion. Opt-in. | `mcv-status` |
+| `hooks/hooks.json` | SessionStart gives a worker its rules; PreToolUse refuses AskUserQuestion, and on Bash refuses git commands past the worker's branch. Opt-in. | `mcv-status` |
 
 herdr does the process work (worktrees, panes, starting Claude, delivering prompts, reporting
 state); mcv keeps the bookkeeping (which task each worker has, its questions and answers).
@@ -57,18 +57,24 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
 
    A failure, or INT/TERM/HUP, before step 7 undoes the worktree, branch and task. From step 7 on
    the task stays, for `remove`.
-3. **Work.** The worker's SessionStart hook prints its rules and leaves `rules-loaded` in the task
-   folder; `prompt` refuses a worker without it, whose Claude did not load the plugin. The worker
-   reports through `mcv-status`; a `needs-decision` prints a question id and the worker ends its
-   turn.
+3. **Work.** The worker's SessionStart hook prints its rules, leaves `rules-loaded` in the task
+   folder and adds the session's transcript path (from the hook's input) to `transcripts`;
+   `prompt` refuses a worker without `rules-loaded`, whose Claude did not load the plugin. The
+   worker reports through `mcv-status`; a `needs-decision` prints a question id and the worker
+   ends its turn. Its PreToolUse hook on Bash refuses a git command that reaches past its branch
+   (Git guard, below).
 4. **Watch.** `mcv-watch` prints the event; the coordinator relays the question to the user as
    `<id> #<n>`, reads the worker's screen, sends the answer with `prompt --no-wait`, and records it
    with `mcv-status --task ... answered`. If the worker is still busy, the coordinator records the
    answer as `pending` instead, and the watcher prints it back as `deliver` when the worker stops.
 5. **Remove** (`mcv-herdr.sh remove`), when the user agrees: refuse a dirty worktree, remove it
-   through herdr (or git, if the workspace is already gone), delete the task state, then the
-   project's state folder and herdr's per-repository folder if they are left empty. The branch
-   stays.
+   through herdr (or git, if the workspace is already gone), copy the task's `meta`, `status.log`
+   and `transcripts` to `<project>/history/<id>-<UTC time>/` (if that fails, the task state
+   stays), delete the task state, then the project's `tasks` folder and herdr's per-repository
+   folder if they are left empty. The branch stays.
+
+`spawn`, `prompt` and `remove` each add a line to `<project>/journal.log`, done or refused, once
+the command has a sound task name (only `spawn` creates the project folder for it).
 
 ## State
 
@@ -84,9 +90,17 @@ $MCV_HOME/
     meta                              JSON, written whole and renamed into place
     starting                          present until Claude has started
     rules-loaded                      left by the worker's SessionStart hook
+    transcripts                       the worker's Claude transcript paths, one per session
     status.log                        one event per line
     status.log.lock/pid               held during one write to the log
+  <project>/journal.log               one line per helper call and coordinator note; kept
+  <project>/history/<id>-<time>/      meta, status.log, transcripts, copied by remove; kept
 ```
+
+**journal.log** line: `<UTC time>\t<source>\t<project>/<id> or ->\t<text>`, with source `spawn`,
+`prompt` or `remove` (text `ok: <what>` or `error: <the refusal>`; prompt logs the text's length,
+not the text) or `note` (the coordinator's, through `mcv-status --journal`). Lines are short and
+appended in one write each, so writers take no lock. Nothing deletes the journal or history.
 
 **meta** fields: `task`, `agent`, `workspace_id`, `pane_id`, `worktree`, `repo`, `branch`, `base`,
 `context` (empty when none), `copied` (number of files from `.worktreeinclude`), `created` (UTC).
@@ -135,6 +149,30 @@ turn) while an answer is pending, or at once when the answer is recorded after i
 replaces the `state done` of that stop. On its first poll the watcher prints the questions still
 without an answered or pending line, the deliveries owed, and nothing else from the past.
 
+## Git guard
+
+`mcv-status --guard-git`, the worker's PreToolUse hook on Bash, gets the command and its folder
+from the hook's input (`tool_input.command`, `cwd`) and the worker's branch from meta. It splits the
+command at `;`, `&`, `|`, `(`, `)`, `` ` ``, `{`, `}` and newlines, drops quotes, and looks at each
+piece that starts with `git` (after `VAR=value`, `env`, `command`, `exec`, `sudo`, `nohup`;
+following `-C`). It refuses, with a reason that names the worker's branch and `needs-decision`:
+
+- `push` with `--force`, `-f` (also inside `-uf`), `--force-if-includes` or a `+` refspec;
+  `--force-with-lease` passes, but only to the worker's branch like any push;
+- `push` with `--all`, `--branches`, `--mirror`, `--tags` or `--prune`;
+- `push` to any destination but the worker's branch (`refs/heads/` stripped; a tag or other ref is
+  refused), deletes included; with no refspec, or `HEAD`, the branch checked out in that folder
+  must be the worker's;
+- `branch` deleting a branch but the worker's (remote-tracking `-r` passes), renaming any, `-C`,
+  or `-f` on another branch; `tag -d` and `tag -f`; `update-ref` on another branch or a tag;
+  `checkout -B` and `switch -C` on another branch.
+
+It works from the command's text: a script, an alias or a variable hides a command from it, and a
+quoted message that holds such a command is refused too. It guards against mistakes in an
+unattended worker; a server-side protected branch is the guarantee. Checked with a real Claude
+worker (Claude Code 2.1): `git tag -d` was refused before it ran, with the reason shown to the
+worker.
+
 ## Invariants
 
 - A worker never runs in the user's checkout: spawn checks the worktree's git dir differs from the
@@ -142,6 +180,8 @@ without an answered or pending line, the deliveries owed, and nothing else from 
 - A worker's branch is new, exists nowhere else in any letter case, is never a shared branch, and
   has no upstream.
 - Hooks do nothing outside a worker.
+- A worker's git command that pushes to another branch, force-pushes, or deletes or moves another
+  branch or a tag is refused before it runs, as far as its text shows it (Git guard).
 - No work is sent to a worker that did not get its rules: `prompt` needs `rules-loaded`.
 - An answer the user gave is never lost to a busy worker: it waits as `pending` until delivered.
 - A worker is refused when it records an answer (`mcv-status --task` with `MCV_TASK` set), and its
@@ -173,6 +213,8 @@ with every herdr window closed.
 - Task state is not a security boundary. A worker runs as the user: one that unsets `MCV_TASK`
   can record an answer to its own question, and one that sets it can write into another task's
   log. mcv refuses the plain cases and the worker's rules forbid the rest.
+- The git guard reads command text; a script, an alias or a variable gets past it. Beyond git,
+  a worker in auto mode is limited only by Claude Code's own permission checks.
 - herdr types the worker's `claude --settings ...` command at the pane's shell prompt, so it is in
   that shell's history. It holds the task name and paths only.
 - `remove` leaves open the workspace herdr opened for the repository's main checkout on the first

@@ -1,5 +1,5 @@
 {
-  "description": "mcv worker hooks. Both do nothing unless MCV_TASK is set, which only an mcv worker has.",
+  "description": "mcv worker hooks. Each does nothing unless MCV_TASK is set, which only an mcv worker has.",
   "hooks": {
     "SessionStart": [
       {
@@ -18,6 +18,15 @@
           {
             "type": "command",
             "command": "[ -n \"${MCV_TASK:-}\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/bin/mcv-status\" --deny-ask"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"${MCV_TASK:-}\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/bin/mcv-status\" --guard-git"
           }
         ]
       }

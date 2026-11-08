@@ -157,16 +157,49 @@ echo x >"$wt/new-file"
 out="$("$H" remove a-b/c 2>&1)"; rc=$?
 expect "remove refuses a dirty worktree" '[[ $rc -eq 1 && "$out" == *uncommitted* && -f "$wt/new-file" ]]' "rc=$rc $out"
 
-# remove leaves no empty folders of its own behind: the project's state
+# remove leaves no empty folders of its own behind: the project's tasks
 # folder once its last task is gone, and herdr's per-repository worktree
-# folder once its last worktree is. A folder that still holds something stays.
+# folder once its last worktree is. A folder that still holds something
+# stays, and so does the project's folder, which keeps its journal and history.
 out="$(FAKE_DIR="$root/fake2" "$H" spawn solo s1 "$repo" fix/s1 2>&1)"; rc=$?
 wt="$(jq -r .worktree "$(meta solo s1)")"
 expect "spawn solo/s1 succeeds" '[[ $rc -eq 0 && -d "$wt" ]]' "rc=$rc $out"
+j="$MCV_HOME/solo/journal.log"
+expect "the journal has a line for the spawn" \
+  'awk -F"\t" "\$2 == \"spawn\" && \$3 == \"solo/s1\" && \$4 ~ /^ok/" "$j" | grep -q .' "$(cat "$j" 2>&1)"
+FAKE_DIR="$root/fake2" "$H" spawn solo s1 "$repo" fix/s1-again >/dev/null 2>&1
+expect "a refused command is in the journal with its reason" \
+  'awk -F"\t" "\$2 == \"spawn\" && \$4 ~ /^error: task solo\/s1 already exists/" "$j" | grep -q .' "$(cat "$j" 2>&1)"
+MCV_TASK=solo/s1 "$HERE/../bin/mcv-status" note "half way" >/dev/null
 out="$(FAKE_DIR="$root/fake2" "$H" remove solo/s1 2>&1)"; rc=$?
 expect "remove of a project's last task succeeds" '[[ $rc -eq 0 ]]' "rc=$rc $out"
-expect "the project's empty state folder is gone" '[[ ! -e "$MCV_HOME/solo" ]]'
+expect "the project's empty tasks folder is gone" '[[ ! -e "$MCV_HOME/solo/tasks" ]]'
 expect "herdr's empty per-repository folder is gone" '[[ ! -e "$(dirname "$wt")" ]]'
+hist="$(ls -d "$MCV_HOME"/solo/history/s1-* 2>/dev/null | head -1)"
+expect "remove keeps the task's meta in its history" '[[ -n "$hist" && "$(jq -r .branch "$hist/meta" 2>/dev/null)" == fix/s1 ]]' "$hist"
+expect "the history keeps the status log" 'grep -q "half way" "$hist/status.log" 2>/dev/null'
+expect "the history keeps the worker's transcript path" \
+  'grep -qx "$root/fake2/transcripts/solo-s1.jsonl" "$hist/transcripts" 2>/dev/null' "$(cat "$hist/transcripts" 2>&1)"
+expect "the journal names where the history went" \
+  'awk -F"\t" "\$2 == \"remove\" && \$3 == \"solo/s1\"" "$j" | grep -qF "$hist"' "$(cat "$j" 2>&1)"
+expect "remove's output names the history folder" '[[ "$(jq -r .history <<<"$out" 2>/dev/null)" == "$hist" ]]' "$out"
+
+# The coordinator adds its own lines to the journal; a worker cannot.
+S="$HERE/../bin/mcv-status"
+out="$("$S" --journal solo "watcher restarted after 30 minutes" 2>&1)"; rc=$?
+expect "--journal adds a coordinator note" \
+  '[[ $rc -eq 0 ]] && awk -F"\t" "\$2 == \"note\" && \$3 == \"-\" && \$4 == \"watcher restarted after 30 minutes\"" "$j" | grep -q .' "rc=$rc $out"
+out="$("$S" --journal solo/s1 "worker needed the API path" 2>&1)"; rc=$?
+expect "--journal with a task names it" \
+  '[[ $rc -eq 0 ]] && awk -F"\t" "\$2 == \"note\" && \$3 == \"solo/s1\"" "$j" | grep -q .' "rc=$rc $out"
+out="$(MCV_TASK=solo/s1 "$S" --journal solo "x" 2>&1)"; rc=$?
+expect "--journal refused for a worker" '[[ $rc -eq 1 && "$out" == *worker* ]]' "rc=$rc $out"
+for bad_p in "../x" "Solo" ""; do
+  out="$("$S" --journal "$bad_p" "x" 2>&1)"; rc=$?
+  expect "--journal refuses project '$bad_p'" '[[ $rc -ne 0 && ! -e "$MCV_HOME/x" ]]' "rc=$rc $out"
+done
+out="$("$S" --journal solo "" 2>&1)"; rc=$?
+expect "--journal refuses empty text" '[[ $rc -eq 2 ]]' "rc=$rc $out"
 expect "another project's state is untouched" '[[ -d "$MCV_HOME/acme/tasks" ]]'
 out="$("$H" spawn solo s2 "$repo" fix/s2 2>&1)"
 wt="$(jq -r .worktree "$(meta solo s2)")"
