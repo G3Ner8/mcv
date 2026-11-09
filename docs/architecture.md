@@ -45,13 +45,18 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    2. Refuse an existing branch, locally or on a remote, ignoring case, and `main`/`master`/`develop`.
    3. Lock the repository (`$MCV_HOME/.locks/<repo key>`), fetch, resolve the base (`--base`, else
       the default branch of `origin` or of the only remote, else HEAD when there is no remote).
-   4. `herdr worktree create`; write meta at once, with a `starting` marker.
+   4. `herdr worktree create`, labelled `mcv <project>/<id>`; if herdr opened a workspace for the
+      repository's main checkout with it (none was open before), record its id in
+      `.repo-workspaces/<repo key>`. Write meta at once, with the base commit and a `starting`
+      marker.
    5. Check the worktree is not the main checkout; clear the branch's upstream; release the lock.
    6. Refuse a context that holds the worktree; copy `.worktreeinclude` files; rewrite meta with
       the count.
    7. `herdr agent start` with `--add-dir <context>` (if any) and `--settings` carrying `MCV_TASK`,
       `MCV_HOME`, and for a context `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` and a deny rule
-      for edits there. Remove `starting`. Claude arguments after `--` follow; spawn refused
+      for edits there. If it fails, the error ends with the pane's last four lines (`pane read`),
+      since herdr types the command at the shell prompt and only reports a timeout when the shell
+      took it. Remove `starting`. Claude arguments after `--` follow; spawn refused
       `--add-dir` and `--settings` among them (and `--base`/`--context`) before step 1, since
       either would undo the deny rule or `MCV_TASK`.
 
@@ -66,12 +71,16 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
 4. **Watch.** `mcv-watch` prints the event; the coordinator relays the question to the user as
    `<id> #<n>`, reads the worker's screen, sends the answer with `prompt --no-wait`, and records it
    with `mcv-status --task ... answered`. If the worker is still busy, the coordinator records the
-   answer as `pending` instead, and the watcher prints it back as `deliver` when the worker stops.
+   answer as `pending` instead, and the watcher prints it back as `DELIVER` when the worker stops.
 5. **Remove** (`mcv-herdr.sh remove`), when the user agrees: refuse a dirty worktree, remove it
    through herdr (or git, if the workspace is already gone), copy the task's `meta`, `status.log`
    and `transcripts` to `<project>/history/<id>-<UTC time>/` (if that fails, the task state
    stays), delete the task state, then the project's `tasks` folder and herdr's per-repository
-   folder if they are left empty. The branch stays.
+   folder if they are left empty. The branch stays, unless it is still at the base commit in meta,
+   has no upstream and no remote-tracking ref of that name: then it held no work and is deleted
+   (a task from before 0.2.1 has no base commit, so its branch stays). Last, when no worktree of
+   the repository is open any more, close the main-checkout workspace recorded in
+   `.repo-workspaces/<repo key>`, if it still has one pane whose shell has nothing in front of it.
 
 `spawn`, `prompt` and `remove` each add a line to `<project>/journal.log`, done or refused, once
 the command has a sound task name (only `spawn` creates the project folder for it).
@@ -84,6 +93,7 @@ Everything lives under `$MCV_HOME` (default `~/.claude/mcv`), outside every repo
 $MCV_HOME/
   .claims/<project>-<id>/pid          held during one spawn of that worker name
   .locks/<repo key>/pid               held while one spawn fetches and creates a worktree there
+  .repo-workspaces/<repo key>         id of the main-checkout workspace herdr opened for a spawn
   <project>/watch.lock/pid            held by the one mcv-watch of that project
   <lock>.takeover/                    next to any lock below, held while one process takes it over
   <project>/tasks/<id>/
@@ -103,7 +113,8 @@ not the text) or `note` (the coordinator's, through `mcv-status --journal`). Lin
 appended in one write each, so writers take no lock. Nothing deletes the journal or history.
 
 **meta** fields: `task`, `agent`, `workspace_id`, `pane_id`, `worktree`, `repo`, `branch`, `base`,
-`context` (empty when none), `copied` (number of files from `.worktreeinclude`), `created` (UTC).
+`base_sha` (the commit the branch started at), `context` (empty when none), `copied` (number of
+files from `.worktreeinclude`), `created` (UTC).
 
 **status.log** line: `<UTC time>\t<kind>\t<question id or ->\t<text>`, with kind one of
 `needs-decision`, `blocked`, `done`, `failed`, `note` (the worker's), `pending`, `answered` (the
@@ -134,20 +145,31 @@ The pane identifies the worker: a task removed and spawned again gets a new pane
 
 ## Watcher events
 
-Tab-separated, one per line:
+One per line, `⧉ <id> · <EVENT>[ <qid>] · <text>`, so the coordinator and the user can tell mcv's
+lines from the rest of a session. `MCV_WATCH_RAW=1` gives the same events tab-separated, as the
+tests read them; the raw kind is in brackets:
 
 ```
-<time>  <project>/<id>  <kind>   <qid|->  <text>   a new worker line in the status log
-<time>  <project>/<id>  deliver  <qid>    <text>   a pending answer, now that the worker has stopped
-<time>  <project>/<id>  state    blocked           the worker stopped at a dialog
-<time>  <project>/<id>  state    done              a turn ended with no report line since the last event
-<time>  <project>/<id>  gone     -                 the worker no longer runs Claude
+⧉ <id> · QUESTION <qid> · <text>   (needs-decision) a worker's question
+⧉ <id> · BLOCKED · <text>          (blocked) the worker reports it cannot go on
+⧉ <id> · DONE · <text>             (done)
+⧉ <id> · FAILED · <text>           (failed)
+⧉ <id> · NOTE · <text>             (note)
+⧉ <id> · WAITING · ...             (state blocked) the worker stopped at a dialog
+⧉ <id> · RESUMED · ...             (state working) it left that dialog: answered in its pane
+⧉ <id> · STOPPED · ...             (state done) a turn ended with no report line since the last event
+⧉ <id> · DELIVER <qid> · <answer>  (deliver) a pending answer, now that the worker has stopped
+⧉ <id> · GONE · ...                (gone) the worker no longer runs Claude
 ```
 
-`deliver` goes out when the worker stops (reaches done or idle from another state, or ends another
+`DELIVER` goes out when the worker stops (reaches done or idle from another state, or ends another
 turn) while an answer is pending, or at once when the answer is recorded after it stopped; it
-replaces the `state done` of that stop. On its first poll the watcher prints the questions still
-without an answered or pending line, the deliveries owed, and nothing else from the past.
+replaces the `STOPPED` of that stop. `RESUMED` is the one change to working that is printed: from
+blocked. Without it a coordinator last told "blocked" kept asking the user to approve a dialog
+they had already answered in the pane (seen in the first real run). `STOPPED` is a turn end, not
+the end of the task: a worker waiting on a sub-agent or a build ends turns too, and was seen to
+end two within five seconds. On its first poll the watcher prints the questions still without an
+answered or pending line, the deliveries owed, and nothing else from the past.
 
 ## Git guard
 
@@ -200,6 +222,8 @@ Measured against herdr 0.9.5 (protocol 22) on macOS, 2026-11-06 and 2026-11-07.
 | `agent prompt <name> <text> --wait [--until ...]` | Text starting with `-` is taken as text. Refuses an agent that is not idle or done. |
 | Claude exiting in its pane | herdr either drops the agent (`agent_not_found`) or lists it as done but refuses prompts (`agent_not_ready`, or `agent_not_running` as seen after `/exit`). `pane read` still shows the screen. |
 | `worktree remove --workspace <id>` | Removes the worktree and closes the workspace. After the user closes the workspace, it fails with `workspace_not_found`, and git removes the worktree instead. |
+| Repository workspaces (2026-11-08, 2026-11-09) | Every worktree workspace sits under a workspace for its repository's main checkout. When none is open, one `worktree create` opens both; `worktree remove` closes only the worktree's. Closing the main-checkout workspace closes its worktree workspaces in the same instant. `workspace list` gives each `worktree.is_linked_worktree`, `checkout_path` and `repo_root`; `pane process-info` gives `shell_pid` and `foreground_process_group_id`, equal when the shell is idle. A label may hold spaces and `/`. |
+| Shell in a new pane | `agent start` types the claude command at the pane's shell prompt. Seen: oh-my-zsh's "update? [Y/n]" prompt took the first `c`, the shell ran `laude`, and `agent start` failed with only `timeout: timed out waiting for agent startup`. |
 | `status --json`, `integration status` | `doctor` requires herdr >= 0.9.5 and the Claude integration `current`; updating herdr does not refresh the integration. |
 | `--settings '{"env": ...}'` | Reaches both the hooks and the Bash tool of the worker. |
 
@@ -217,11 +241,14 @@ with every herdr window closed.
   a worker in auto mode is limited only by Claude Code's own permission checks.
 - herdr types the worker's `claude --settings ...` command at the pane's shell prompt, so it is in
   that shell's history. It holds the task name and paths only.
-- `remove` leaves open the workspace herdr opened for the repository's main checkout on the first
-  spawn there.
 - herdr shows each worker under the workspace it takes as its repository's main checkout, not
   under the coordinator's; mcv cannot choose (measured: `worktree create --workspace` names the
-  repository through an open workspace, in place of `--cwd`, and does not pick a parent).
+  repository through an open workspace, in place of `--cwd`, and does not pick a parent). When the
+  user already had that workspace open, workers appear under it, and closing it closes them.
+- `remove` closes a main-checkout workspace only when a spawn made herdr open it and it is still
+  idle with one pane; one the user has started using stays open, for a later remove.
+- Anything a new pane's shell asks before its prompt (an update check, a plugin question) breaks
+  `agent start`. mcv cannot answer it; the error shows it so the user can turn it off.
 - SIGKILL to `spawn` while herdr creates the worktree can leave that worktree behind.
 
 ## Next

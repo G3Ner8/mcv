@@ -24,13 +24,16 @@
 #       several remotes and no origin need --base). A bare repository is
 #       refused. The new branch has no upstream until the worker pushes it. One
 #       spawn runs at a time per repository; a second one waits for the
-#       first. herdr chooses the folder, under ~/.herdr/worktrees/. Then start
+#       first. herdr chooses the folder, under ~/.herdr/worktrees/, and labels
+#       its workspace "mcv <project>/<id>". Then start
 #       an idle Claude in it with MCV_TASK=<project>/<id> set. Send it work with `prompt`. Arguments after
 #       `--` go to claude, e.g. -- --permission-mode default; mcv's own
 #       --base and --context there are refused, and so are Claude's
 #       --add-dir (it would let the worker edit that folder) and --settings
 #       (it could override MCV_TASK), as --flag value or --flag=value. If Claude fails to
-#       start (for example at the folder trust dialog), the task is left in
+#       start (for example at the folder trust dialog, or because the shell
+#       asked something first), the error ends with "its pane shows: " and the
+#       pane's last lines, and the task is left in
 #       place: once the user lets Claude through in its pane, `prompt` works;
 #       otherwise run `remove` before reusing the id. <project>-<id> must not
 #       be the name of another task or herdr agent.
@@ -69,10 +72,13 @@
 #       Refused while the worker is working or at a dialog, and while the
 #       worktree has uncommitted or untracked files, or git cannot read it;
 #       ignored files are deleted with it. The branch is kept, as a local
-#       branch; push it first if you need it. The workspace herdr opened for
-#       the repository's main checkout stays open; close it in herdr. Folders
-#       left empty (the project's tasks folder, herdr's folder for the
-#       repository) are removed.
+#       branch (branch_kept); push it first if you need it. A branch still at
+#       the commit it started from, with no upstream and on no remote, holds no
+#       work and is deleted (branch_deleted). Once no worktree of the
+#       repository is open, the workspace herdr opened for its main checkout
+#       at a spawn is closed (closed_workspace), if it is still one idle
+#       shell; one the user had open stays. Folders left empty (the project's
+#       tasks folder, herdr's folder for the repository) are removed.
 #       Also works after the user has closed the worker's herdr workspace.
 #
 # <project> and <id>: lowercase letters, digits, - and _; <project> starts with
@@ -282,6 +288,58 @@ unlock_repo() {
   LOCK=""
 }
 
+# herdr keeps every worktree's workspace under a workspace for the
+# repository's main checkout, and opens one when none is open (measured with
+# herdr 0.9.5: one `worktree create` made both). That one is the user's when
+# they had it open already; when a spawn made herdr open it, the last remove
+# in the repository closes it again. The record of which one a spawn opened
+# is a file per repository, since workers of several tasks share it.
+repo_ledger() { printf '%s/.repo-workspaces/%s' "$MCV_HOME" "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
+
+# Print the ids of the open workspaces of main checkout $1 (linked=false), or
+# of its worktrees (linked=true), one per line. Paths are compared by -ef, as
+# herdr may spell them differently.
+repo_workspaces() {
+  local id p
+  h_try workspace list || return 0
+  while IFS=$'\t' read -r id p; do
+    [[ -n "$p" && "$p" -ef "$1" ]] && printf '%s\n' "$id"
+  done < <(jq -r --argjson l "$2" '.result.workspaces[]?
+      | select(.worktree.is_linked_worktree == $l)
+      | [.workspace_id, (if $l then .worktree.repo_root else .worktree.checkout_path end)] | @tsv' \
+      <<<"$HOUT" 2>/dev/null || true)
+  return 0
+}
+
+# Close the main-checkout workspace a spawn made herdr open for repository
+# $1, once no worktree of it is open any more, and print its id. Only a
+# workspace left as herdr opened it is closed: one pane whose shell has
+# nothing running in front of it. One the user has started using stays, and
+# so does its record, for a later remove. Never fails: a failure here only
+# leaves a workspace open.
+close_repo_workspace() {
+  local ledger ws out pane
+  ledger="$(repo_ledger "$1")"
+  ws="$(cat "$ledger" 2>/dev/null || true)"
+  [[ -n "$ws" ]] || return 0
+  [[ -z "$(repo_workspaces "$1" true)" ]] || return 0
+  if ! grep -qxF "$ws" <<<"$(repo_workspaces "$1" false)"; then
+    # The user closed it already.
+    rm -f "$ledger"
+    return 0
+  fi
+  h_try workspace get "$ws" || return 0
+  [[ "$(jfield "$HOUT" .result.workspace.pane_count)" == 1 ]] || return 0
+  h_try pane list --workspace "$ws" || return 0
+  pane="$(jfield "$HOUT" '.result.panes[0].pane_id')"
+  [[ -n "$pane" ]] && h_try pane process-info --pane "$pane" || return 0
+  out="$(jq -r '.result.process_info | select(.foreground_process_group_id == .shell_pid) | "idle"' <<<"$HOUT" 2>/dev/null || true)"
+  [[ "$out" == idle ]] || return 0
+  h_try workspace close "$ws" || return 0
+  rm -f "$ledger"
+  printf '%s' "$ws"
+}
+
 # One spawn at a time per worker name, taken before anything is checked or
 # made. Two spawns of one task, or of two tasks whose names join the same
 # (a-b/c and a/b-c), would otherwise both pass the checks and overwrite each
@@ -296,19 +354,20 @@ NEW_ROOT=""
 NEW_BRANCH=""
 NEW_WS=""
 NEW_DIR=""
-NEW_NAME=""
+NEW_LABEL=""
 spawn_cleanup() {
   local rc=$? ws p
   if (( rc != 0 )); then
     # A signal during worktree create stops this script only once herdr has
     # answered, before its answer is read: find the workspace by its label
     # and the worktree by the branch, which this spawn alone created.
-    if [[ -z "$NEW_WS" && -n "$NEW_BRANCH" && -n "$NEW_NAME" ]]; then
+    if [[ -z "$NEW_WS" && -n "$NEW_BRANCH" && -n "$NEW_LABEL" ]]; then
       NEW_WS="$(herdr workspace list 2>/dev/null \
-        | jq -r --arg l "$NEW_NAME" '[.result.workspaces[]? | select(.label == $l)][0].workspace_id // empty' \
+        | jq -r --arg l "$NEW_LABEL" '[.result.workspaces[]? | select(.label == $l)][0].workspace_id // empty' \
           2>/dev/null || true)"
     fi
     [[ -z "$NEW_WS" ]] || herdr worktree remove --workspace "$NEW_WS" >/dev/null 2>&1 || true
+    [[ -z "$NEW_ROOT" ]] || close_repo_workspace "$NEW_ROOT" >/dev/null || true
     if [[ -n "$NEW_BRANCH" ]]; then
       p="$(git -C "$NEW_ROOT" worktree list --porcelain 2>/dev/null \
         | awk -v b="branch refs/heads/$NEW_BRANCH" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
@@ -623,12 +682,22 @@ cmd_spawn() {
   r="$(branch_clash "$root" "$lc")" \
     && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
 
-  # From here on, a branch named $branch was made by this spawn.
+  # From here on, a branch named $branch was made by this spawn. The label
+  # marks the workspace as mcv's in herdr's sidebar, beside the user's own.
+  local label="mcv $project/$id"
   NEW_BRANCH="$branch"
-  NEW_NAME="$name"
-  local created ws pane wt linked
+  NEW_LABEL="$label"
+  local created ws pane wt linked before opened
+  before="$(repo_workspaces "$root" false)"
   created="$(h worktree create --cwd "$root" --branch "$branch" ${base:+--base "$base"} \
-    --label "$name" --no-focus)"
+    --label "$label" --no-focus)"
+  # A main-checkout workspace that was not open before was opened for this
+  # spawn; the last remove in the repository closes it.
+  opened="$(repo_workspaces "$root" false | grep -vxF -e "${before:-}" -e '' | head -1 || true)"
+  if [[ -n "$opened" ]]; then
+    mkdir -p "$(dirname "$(repo_ledger "$root")")" 2>/dev/null \
+      && printf '%s\n' "$opened" >"$(repo_ledger "$root")" 2>/dev/null || true
+  fi
   ws="$(jfield "$created" .result.workspace.workspace_id)"
   pane="$(jfield "$created" .result.root_pane.pane_id)"
   wt="$(jfield "$created" .result.worktree.path)"
@@ -644,8 +713,11 @@ cmd_spawn() {
   # While Claude starts, which can take a minute, its pane is not in herdr's
   # agent list yet; the "starting" marker stops mcv-watch from reporting the
   # worker gone. It stays if Claude fails to start, until `remove`.
-  local copied=0 created_at
+  local copied=0 created_at base_sha
   created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # The commit the branch starts at: remove deletes a branch still there,
+  # which holds no work.
+  base_sha="$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null || true)"
   mkdir -p "$dir"
   NEW_DIR="$dir"
   : >"$dir/starting"
@@ -653,10 +725,11 @@ cmd_spawn() {
     local meta tmp
     meta="$(jq -cn --arg task "$project/$id" --arg agent "$name" --arg ws "$ws" --arg pane "$pane" \
       --arg wt "$wt" --arg repo "$root" --arg branch "$branch" --arg base "${base:-HEAD}" \
+      --arg base_sha "$base_sha" \
       --arg context "$context" --argjson copied "$copied" --arg created "$created_at" \
       '{task: $task, agent: $agent, workspace_id: $ws, pane_id: $pane, worktree: $wt,
-        repo: $repo, branch: $branch, base: $base, context: $context, copied: $copied,
-        created: $created}')"
+        repo: $repo, branch: $branch, base: $base, base_sha: $base_sha, context: $context,
+        copied: $copied, created: $created}')"
     # Written whole, then renamed, so mcv-watch never reads half a file.
     tmp="$(mktemp "$dir/.meta.XXXXXX")"
     printf '%s\n' "$meta" >"$tmp"
@@ -728,8 +801,18 @@ cmd_spawn() {
       + (if $c == "" then {} else {CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1"} end))}
      + (if $c == "" then {} else {permissions: {deny: ["Edit(/" + $c + "/**)"]}} end)')"
   [[ -z "$context" ]] || ctx_args=(--add-dir "$context")
-  h agent start "$name" --kind claude --pane "$pane" --timeout 60000 \
-    -- ${ctx_args[@]+"${ctx_args[@]}"} --settings "$settings" ${1+"$@"} >/dev/null
+  if ! h_try agent start "$name" --kind claude --pane "$pane" --timeout 60000 \
+    -- ${ctx_args[@]+"${ctx_args[@]}"} --settings "$settings" ${1+"$@"}; then
+    # herdr types the claude command at the pane's shell prompt, so anything
+    # the shell asks first (an update prompt, say) takes part of it, and herdr
+    # only reports a timeout. The pane's last lines show what happened.
+    local msg="$HERR_MSG" screen=""
+    if h_try pane read "$pane" --source recent-unwrapped --lines 20; then
+      screen="$(printf '%s\n' "$HOUT" | sed -e 's/[[:space:]]*$//' -e '/^$/d' | tail -n 4 \
+        | awk 'NR > 1 { printf " / " } { printf "%s", $0 }')"
+    fi
+    die "herdr agent start: $msg${screen:+; its pane shows: $screen}"
+  fi
   rm -f "$dir/starting"
 
   journal "ok: branch $branch from ${base:-HEAD}, worktree $wt${context:+, context $context}"
@@ -897,8 +980,29 @@ cmd_remove() {
   # folder, which holds its journal and history.
   rmdir "$(dirname "$dir")" 2>/dev/null || true
   rmdir "$(dirname "$wt")" 2>/dev/null || true
-  journal "ok: branch $branch kept, history $hist"
-  jq -cn --arg b "$branch" --arg h "$hist" '{removed: true, branch_kept: $b, history: $h}'
+
+  # A branch still at the commit it started from holds no work, and kept, it
+  # would block a new spawn under the same name (seen when a first spawn
+  # failed to start Claude). It goes only when it never moved, has no
+  # upstream and no remote has a branch of that name; anything else is kept.
+  # A task from before 0.2.1 has no base commit recorded, so its branch stays.
+  local base_sha kept="kept" closed
+  base_sha="$(jfield "$m" .base_sha)"
+  if [[ -n "$base_sha" && -n "$branch" ]] \
+    && [[ "$(git -C "$repo" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null || true)" == "$base_sha" ]] \
+    && [[ -z "$(git -C "$repo" config "branch.$branch.merge" 2>/dev/null || true)" ]] \
+    && [[ -z "$(git -C "$repo" for-each-ref --format=x "refs/remotes/*/$branch" 2>/dev/null || true)" ]] \
+    && git -C "$repo" branch -D "$branch" >/dev/null 2>&1; then
+    kept="deleted"
+  fi
+  closed="$(close_repo_workspace "$repo")"
+
+  local note="branch $branch $kept"
+  [[ "$kept" == kept ]] || note="$note (no commits past its base)"
+  journal "ok: $note${closed:+, closed repository workspace $closed}, history $hist"
+  jq -cn --arg b "$branch" --arg k "$kept" --arg h "$hist" --arg c "$closed" \
+    '{removed: true} + (if $k == "kept" then {branch_kept: $b} else {branch_deleted: $b} end)
+     + {history: $h} + (if $c == "" then {} else {closed_workspace: $c} end)'
 }
 
 case "$CMD" in

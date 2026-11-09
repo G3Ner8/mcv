@@ -94,9 +94,29 @@ A repository whose settings differ from the rest gets an object instead of a pat
 Paths are relative to the project folder, or absolute.
 
 Then ask for work in plain words ("the cart total in web ignores the oat-milk surcharge, fix it; and
-add a CSV export of loyalty points to api"). Before starting anything, the coordinator shows each
-worker it plans, with its task id, repo and branch, and waits for your yes. Questions arrive
-labelled by task, for example `cart-fix #1`; answer in plain words. The coordinator never answers a worker's question or approves a worker's dialog for you.
+add a CSV export of loyalty points to api"). The coordinator never picks work for you: started
+with `/mcv` alone, it asks what to do. Before starting anything, it shows each worker it plans,
+with its task id, repo and branch, and waits for your yes, in a message of its own; agreeing to
+the config does not start a worker. Questions arrive labelled by task, for example
+`cart-fix #1`; answer in plain words. The coordinator never answers a worker's question or
+approves a worker's dialog for you.
+
+Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
+
+```
+⧉ cart-fix · QUESTION #1
+  web · fix/cart-total
+
+  Add the surcharge per drink, or once per order?
+
+  1  per drink, as the till prints it on the receipt      ← recommended
+  2  once per order
+
+  Reply  cart-fix #1 1
+```
+
+If your terminal font has no `⧉` and shows a box instead, mcv still works; the mark is only
+there to catch the eye.
 
 ## Run the helper by hand
 
@@ -119,7 +139,7 @@ H spawn brewly cart-fix ~/code/brewly/web fix/cart-total
 H prompt brewly/cart-fix "The cart total ignores the oat-milk surcharge; fix it"
 H read brewly/cart-fix                       # what the worker said
 H agents                                     # every herdr agent and its state
-H remove brewly/cart-fix                     # close it; the branch is kept
+H remove brewly/cart-fix                     # close it; keeps the branch if it holds work
 ```
 
 Run `H` with no arguments for every command and option. By hand you also see what the coordinator
@@ -162,10 +182,20 @@ would: `mcv-watch <project>` (next to `H`) prints each question and stop as it h
 - `remove` refuses while the worker is working or waiting at a dialog, and while the worktree has
   uncommitted or untracked files, or when git cannot read it. Files your `.gitignore` ignores
   (build output, dependencies, a local `.env`) are deleted with the worktree. The branch stays as a
-  local branch; push it first if you need it elsewhere. It also works after you have closed the
-  worker's herdr workspace yourself. The workspace herdr opened for the repository's main checkout
-  stays open; close it in herdr when you no longer need it. Before deleting the task's state it
-  copies the task's record to `~/.claude/mcv/<project>/history/` (see "What mcv writes").
+  local branch; push it first if you need it elsewhere. A branch that never moved from where it
+  started, has no upstream and is on no remote held no work, so `remove` deletes it, and the same
+  name can be used again. It also works after you have closed the worker's herdr workspace
+  yourself. Before deleting the task's state it copies the task's record to
+  `~/.claude/mcv/<project>/history/` (see "What mcv writes").
+- herdr shows each worker's workspace, labelled `mcv <project>/<id>`, under a workspace for its
+  repository's main checkout, and opens that one if you do not have it open. After the last
+  worker of a repository, `remove` closes the one herdr opened for it, unless you have started
+  using it; one you opened yourself is never closed. **Closing a repository's workspace in herdr
+  closes the workers under it.**
+- `spawn` starts Claude by typing the `claude` command at the new pane's shell prompt. Anything
+  your shell asks first takes part of that command: oh-my-zsh's update question did, and Claude
+  never started. The error then ends with the pane's last lines. For oh-my-zsh, set
+  `zstyle ':omz:update' mode reminder` in `~/.zshrc`.
 - `prompt` refuses a worker that has not received mcv's rules (below), since it would never
   report its questions. Usually it is still at the folder trust dialog: pick "Yes" there and
   prompt again. Otherwise its Claude did not load the mcv plugin, which happens when mcv is
@@ -295,7 +325,7 @@ to push without being told, workers will not push.
 - **In your project:** only `.claude/mcv.json`, once you agree to it. If that folder is a git
   repository where the file is not ignored, the coordinator offers to ignore it for you on this
   machine (`.git/info/exclude`), without touching the project's `.gitignore`.
-- **In each repository's git:** a branch per worker, which `remove` keeps; and `origin/HEAD`, which
+- **In each repository's git:** a branch per worker, which `remove` keeps if it holds work; and `origin/HEAD`, which
   `spawn` sets from the remote (`git remote set-head --auto`, as `git clone` does).
 - **Elsewhere on your machine:** task state in `~/.claude/mcv/`, worktrees in `~/.herdr/worktrees/`.
   `remove` deletes both, and the folders it leaves empty, but keeps the task's record (below).

@@ -151,6 +151,9 @@ expect "contract names the task" '[[ "$ctx" == *"shop/t1"* ]]'
 expect "contract gives the absolute mcv-status path" '[[ "$ctx" == *"$S"* ]]'
 expect "contract forbids AskUserQuestion" '[[ "$ctx" == *"AskUserQuestion"* ]]'
 expect "contract says to end the turn" '[[ "$ctx" == *"end your turn"* ]]'
+expect "contract asks for one decision per question" '[[ "$ctx" == *"One decision per needs-decision"* ]]'
+expect "contract asks for a note before a turn ends on background work" \
+  '[[ "$ctx" == *"background work"*"note saying what you are waiting for"* ]]'
 expect "contract keeps AskUserQuestion off even when the user types directly" \
   '[[ "$ctx" == *"outranks the coordinator. Even then"*"never AskUserQuestion"* ]]'
 expect "contract with no branch in meta names none" '[[ "$ctx" == *"the branch you started on"* ]]'

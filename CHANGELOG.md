@@ -4,6 +4,44 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-09
+
+Fixes from the first real run (two workers on a frontend project, issue #8).
+
+### Fixed
+
+- The coordinator picked a task from the project's plan files when started with `/mcv` alone.
+  It now asks what the workers should do and never chooses work itself.
+- One "ok" approved the config, a change to the repos' files and the workers at once. The skill
+  now asks about each in its own message, and a yes to one never counts for another.
+- When the shell in a new pane asked something before Claude started (oh-my-zsh's update
+  question took the first letter of `claude`), `spawn` said only "timed out waiting for agent
+  startup". Its error now ends with the pane's last lines.
+- A dialog the user answered in a worker's pane left the coordinator asking them to approve it
+  again. The watcher now prints `RESUMED` when a worker goes from blocked back to working.
+- The skill read a turn end with no report (`state done`) as a finished task, though a worker
+  waiting on a sub-agent ends turns too. It now treats that as `STOPPED`, reads the screen, and
+  reports a task finished only on `DONE`; workers send a note first when they end a turn while
+  background work runs.
+- A question cut short by the Monitor tool (`...(truncated)`) was relayed as it came. The skill
+  now reads the full line from the task's status log.
+- `remove` kept a branch with no work on it, so a new spawn of the same name was refused until
+  the user deleted it by hand. It now deletes a branch still at its starting commit, with no
+  upstream and on no remote; any other branch is kept as before.
+- `remove` left open the repository workspace herdr opened for the workers. After the last worker
+  of a repository it now closes that one, if it is idle; one the user opened is never closed.
+
+### Changed
+
+- Watcher events read `⧉ <id> · <EVENT> · <text>` (QUESTION, BLOCKED, DONE, FAILED, NOTE, WAITING,
+  RESUMED, STOPPED, DELIVER, GONE) instead of tab-separated fields with an ISO time;
+  `MCV_WATCH_RAW=1` keeps the old form. The skill gives relayed questions, dialogs, results and
+  the status table one fixed shape under the same mark, names the Monitor `⧉ mcv · <project>`, and
+  starts its helper calls' descriptions with `mcv:`.
+- herdr labels a worker's workspace `mcv <project>/<id>`, so it stands apart from the user's own.
+- Workers ask one decision per question, so the user can answer each by its id.
+- The README and the skill warn that closing a repository's workspace in herdr closes its workers.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added

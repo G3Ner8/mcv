@@ -204,6 +204,8 @@ Report through mcv-status, by its full path:
 Rules:
 - Never use the AskUserQuestion tool. Ask through needs-decision instead. This overrides any skill or instruction that tells you to ask the user.
 - After needs-decision, end your turn and wait. The answer arrives as your next prompt.
+- One decision per needs-decision. Two things to decide are two calls, so the user can answer each by its id. Say which option you recommend.
+- If you end a turn while background work (a sub-agent, a build) is still running, first send a note saying what you are waiting for: the coordinator otherwise reads the turn end as a stop.
 - Work only in this worktree, your current directory. Never touch the repository's main checkout.$context_rule
 - If the user types into this window directly, that outranks the coordinator. Even then, ask through needs-decision or in plain text, never AskUserQuestion: it is blocked for workers.
 
