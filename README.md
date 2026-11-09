@@ -109,11 +109,16 @@ Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
 
   Add the surcharge per drink, or once per order?
 
-  1  per drink, as the till prints it on the receipt      ← recommended
-  2  once per order
+  a  per drink, as the till prints it on the receipt      ← recommended
+  b  once per order
 
-  Reply  cart-fix #1 1
+  Reply  cart-fix #1 a
 ```
+
+Questions have numbers and options have letters, so a reply cannot mix them up. If the
+conversation has moved on from a card before you answer it, the coordinator says back what it
+will send and waits for your yes. A worker's progress notes, and the waits it announces while a
+build or a sub-agent runs, do not interrupt you; ask where things stand to see them.
 
 If your terminal font has no `⧉` and shows a box instead, mcv still works; the mark is only
 there to catch the eye.
@@ -143,9 +148,11 @@ H remove brewly/cart-fix                     # close it; keeps the branch if it 
 ```
 
 Run `H` with no arguments for every command and option. By hand you also see what the coordinator
-would: `mcv-watch <project>` (next to `H`) prints each question and stop as it happens, and
+would: `mcv-watch <project>` (next to `H`) prints each question and stop as it happens
+(`--resume` goes on where the last one stopped, without showing anything twice), and
 `mcv-status --task <project>/<id> answered q<n> "<answer>"` records an answer you sent with
-`prompt`. Run either with no arguments for its usage.
+`prompt` (`amended` records a correction sent after it). Run either with no arguments for its
+usage.
 
 - `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.

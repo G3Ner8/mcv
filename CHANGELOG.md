@@ -4,6 +4,32 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-11-09
+
+Fixes from the second real run (three workers, two repositories, issue #10).
+
+### Fixed
+
+- A bare "1" was relayed as the worker's option 1 when the user meant the coordinator's own
+  proposal, and the worker acted on the wrong answer. Options in a question card are now letters
+  (questions keep numbers), a course the coordinator proposes becomes another lettered option,
+  a short reply after the talk has moved on is said back for a yes before it is sent, and the
+  answer is sent and recorded with the option's words, not the letter alone.
+- A correction to an answer already sent could not be recorded, so the status log disagreed with
+  what the worker was told. `mcv-status --task <t> amended <qid> <text>` records it.
+- The git guard read `2>&1` as the push target (`refused, this pushes to 2>`), so both workers'
+  pushes to their own branches were refused. Redirections are now removed before the command is
+  read.
+- Every restart of the watcher (the Monitor tool ends it after 30 minutes) showed the open
+  questions again and the coordinator announced each restart. `mcv-watch <project> --resume` now
+  goes on from where the last watcher stopped; its state is kept under
+  `$MCV_HOME/<project>/watch-state`. The coordinator restarts it silently.
+- Every note woke the coordinator, and every turn a worker ended while a build or sub-agent ran
+  came as `STOPPED`. Notes no longer wake it (they stay in the status table), and a worker that
+  ends a turn to wait says so first with the new `mcv-status waiting <text>`; that stop wakes
+  nobody unless it lasts past `MCV_WATCH_WAIT_LIMIT` seconds (default 1800). This replaces the
+  0.2.1 rule to send a note first. Together these were about a fifth of the coordinator's cost.
+
 ## [0.2.1] - 2026-11-09
 
 Fixes from the first real run (two workers on a frontend project, issue #8).

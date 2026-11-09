@@ -152,8 +152,12 @@ expect "contract gives the absolute mcv-status path" '[[ "$ctx" == *"$S"* ]]'
 expect "contract forbids AskUserQuestion" '[[ "$ctx" == *"AskUserQuestion"* ]]'
 expect "contract says to end the turn" '[[ "$ctx" == *"end your turn"* ]]'
 expect "contract asks for one decision per question" '[[ "$ctx" == *"One decision per needs-decision"* ]]'
-expect "contract asks for a note before a turn ends on background work" \
-  '[[ "$ctx" == *"background work"*"note saying what you are waiting for"* ]]'
+expect "contract asks for waiting before a turn ends on background work" \
+  '[[ "$ctx" == *"\"$S\" waiting"* && "$ctx" == *"end a turn to wait for background work"*"run waiting first"* ]]'
+expect "contract no longer asks for a note before such a turn end" \
+  '[[ "$ctx" != *"note saying what you are waiting for"* ]]'
+expect "contract says notes wake nobody and should be rare" \
+  '[[ "$ctx" == *"note"*"wakes nobody"* ]]'
 expect "contract keeps AskUserQuestion off even when the user types directly" \
   '[[ "$ctx" == *"outranks the coordinator. Even then"*"never AskUserQuestion"* ]]'
 expect "contract with no branch in meta names none" '[[ "$ctx" == *"the branch you started on"* ]]'
@@ -270,11 +274,33 @@ expect "escape and bell characters are removed" '[[ "$last" == *$'"'"'\t'"'"'"ar
 MCV_TASK=shop/t3 "$S" note "สวัสดี ✓" >/dev/null
 expect "Thai and other UTF-8 text is kept" '[[ "$(tail -1 "$log3")" == *"สวัสดี ✓" ]]'
 
+# waiting is a worker kind like note: one line, no id, text required.
+out="$(MCV_TASK=shop/t3 "$S" waiting "qa pair, about 15 minutes")"; rc=$?
+expect "waiting prints nothing and succeeds" '[[ $rc -eq 0 && -z "$out" ]]' "rc=$rc $out"
+expect "waiting is logged with no id" \
+  '[[ "$(tail -1 "$log3" | cut -f2-4)" == "waiting"$'"'"'\t'"'"'"-"$'"'"'\t'"'"'"qa pair, about 15 minutes" ]]' "$(tail -1 "$log3")"
+MCV_TASK=shop/t3 "$S" waiting >/dev/null 2>&1; rc=$?
+expect "waiting without text is refused" '[[ $rc -eq 2 ]]' "rc=$rc"
+
 # A worker cannot close a question; only the coordinator records answers.
 MCV_TASK=shop/t3 "$S" needs-decision "mine" >/dev/null
 out="$(MCV_TASK=shop/t3 "$S" --task shop/t3 answered q2 "self" 2>&1)"; rc=$?
 expect "--task with MCV_TASK set is refused" '[[ $rc -eq 1 && "$out" == *"only the coordinator"* ]]' "rc=$rc $out"
 expect "the question stays open" '! cut -f2,3 "$log3" | grep -qx "answered"$'"'"'\t'"'"'"q2"'
+
+# A correction to an answer already sent is recorded as amended, so the log
+# says what the worker was finally told (measured on carsol: a misread "1").
+env -u MCV_TASK "$S" --task shop/t3 amended q1 "b: run the cases on Dev, within the scope given"; rc=$?
+expect "amending an answered question succeeds" '[[ $rc -eq 0 ]]' "rc=$rc"
+expect "amended line recorded with its text" \
+  '[[ "$(tail -1 "$log3" | cut -f2-4)" == "amended"$'"'"'\t'"'"'"q1"$'"'"'\t'"'"'"b: run the cases on Dev, within the scope given" ]]' "$(tail -1 "$log3")"
+env -u MCV_TASK "$S" --task shop/t3 amended q1 "a second correction" >/dev/null 2>&1; rc=$?
+expect "an answer can be amended again" '[[ $rc -eq 0 ]]' "rc=$rc"
+out="$(env -u MCV_TASK "$S" --task shop/t3 amended q2 "not answered yet" 2>&1)"; rc=$?
+expect "amending an unanswered question exits 1, pointing to answered" \
+  '[[ $rc -eq 1 && "$out" == *"not answered"*"answered"* ]]' "rc=$rc $out"
+MCV_TASK=shop/t3 "$S" --task shop/t3 amended q1 "self" >/dev/null 2>&1; rc=$?
+expect "a worker cannot amend" '[[ $rc -eq 1 ]]' "rc=$rc"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

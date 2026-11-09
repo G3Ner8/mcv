@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.1"
+  version: "0.2.2"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -112,9 +112,12 @@ Skip this skill for:
    herdr pane.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
    tool: `BIN/mcv-watch <project>`, with the description `⧉ mcv · <project>` exactly (it is shown
-   after every event). The Monitor tool ends it after a while (30 minutes, seen in
-   use); while workers are still active, start it again, which shows the open questions again
-   (relay none twice). Never start a second one for the same project. If it exits at
+   after every event). The Monitor tool ends it after 30 minutes (its limit, measured); while
+   workers are still active, start it again with `BIN/mcv-watch <project> --resume`, which goes on
+   from where the last one stopped and shows nothing twice. Restart it without a word to the user
+   and without a journal line; say something only if it will not start. Use plain
+   `BIN/mcv-watch <project>` only for the first watcher of this session. Never start a second one
+   for the same project. If it exits at
    once saying a watcher is already running, check your Monitor tasks: if that one is yours, keep
    using it; if not, another session is watching this project, so tell the user, with the pid the
    message gives, and let them choose to stop it (`kill <pid>`) or work from that session.
@@ -194,8 +197,9 @@ ask instead, so such a need comes to you as a question like any other.
 
 ### Handling what the watcher reports
 
-Each line from the watcher is one event: `⧉ <id> · <EVENT>[ qN] · <text>`. When the watcher starts
-(a new session, or after it was restarted) it first shows every question still without an
+Each line from the watcher is one event: `⧉ <id> · <EVENT>[ qN] · <text>`. Only lines worth a turn
+come: a worker's notes and its announced waits stay in its `status.log` and the status table.
+When the first watcher of a session starts, it shows every question still without an
 answered or pending line, so nothing asked earlier is lost; an answer still pending comes as
 `DELIVER` once the worker has stopped. A question whose `<id> #<n>` you already relayed in this
 conversation is the same question: do not ask the user twice.
@@ -210,11 +214,10 @@ with that id, say): read it there before relaying, and never relay a cut text.
 | `BLOCKED · <text>` | The worker says it cannot continue. Tell the user why and ask what to do. |
 | `WAITING` | The worker stopped at a dialog on its screen. `read` it, describe in plain words what it wants (which command, which file, which question), and ask the user. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
 | `RESUMED` | The dialog is gone: the user answered it in the worker's pane. Stop asking them about it; say in one line that the worker went on. |
-| `STOPPED` | The worker's turn ended without a report. This is not "finished": a worker waiting on background work (a sub-agent, a build) ends turns too, and its last `NOTE` says so. `read` its screen. If it is waiting on something, say nothing, or one line if the user is waiting on it. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. |
+| `STOPPED` | The worker's turn ended without a report, or a wait it announced (`waiting` in its log) has lasted past the watcher's limit. This is not "finished". `read` its screen. If it is still waiting on something that is running, say nothing, or one line if the user is waiting on it; if what it waits on has died or hangs, tell the user. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. |
 | `DONE · <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
 | `FAILED · <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
-| `NOTE · <text>` | Mention it in one line, or not at all if it changes nothing for the user. |
-| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 4 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `DELIVER` comes once per pending line. |
+| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 5 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `DELIVER` comes once per pending line. |
 | `GONE` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
 
 If `prompt` says a worker is not running Claude any more, handle it like `GONE`: `read` its screen
@@ -240,10 +243,10 @@ spaces, then a blank line and what the user does: the exact reply to type, where
 
   Add the surcharge per drink, or once per order?
 
-  1  per drink, as the till prints it on the receipt      ← recommended
-  2  once per order
+  a  per drink, as the till prints it on the receipt      ← recommended
+  b  once per order
 
-  Reply  cart-fix #1 1
+  Reply  cart-fix #1 a
 ```
 
 ```
@@ -271,8 +274,11 @@ spaces, then a blank line and what the user does: the exact reply to type, where
 ```
 
 Label questions `<id> #<n>`, with repo and branch on the line under the header, so two workers in
-the same repo never look alike. Keep the worker's recommendation and mark it. If a question holds
-two decisions, number them `#<n>a` and `#<n>b` in the card and ask for both.
+the same repo never look alike. Options are letters, never numbers: numbers are for questions, so
+`#1 a` cannot be misread. Keep the worker's recommendation and mark it. If a question still holds
+two decisions, letter the second one's options on from the first's (`a b` then `c d`) and ask for
+both: `Reply  cart-fix #1 a c`. A course you propose yourself, after the user asks about a card,
+is not prose next to it: show the card again with your course as one more letter.
 
 **Commands.** Give every helper call a Bash description that starts with `mcv:` and says what it
 does in words: `mcv: start worker cart-fix`, `mcv: send answer to cart-fix #1`, `mcv: read
@@ -291,13 +297,21 @@ cart-fix's screen`. Never leave the description to show the helper's full path.
 ### Sending an answer
 
 1. Match the user's reply to a label. If it could fit more than one question, or does not clearly
-   answer one, ask back. Never guess.
+   answer one, ask back. Never guess. A reply that is only a letter or a number, or only "ok", is
+   clear only right after the card it answers. Once the talk has moved on from the card (you
+   explained it, or offered another course), say back what you would send, in one line, and send
+   it only on a yes: `send cart-fix #1 b (once per order)?`
 2. `BIN/mcv-herdr.sh read <project>/<id>` first. If the worker is still waiting on that question,
    send the answer with `BIN/mcv-herdr.sh prompt <project>/<id> "<answer to <id> #<n>: ...>" --no-wait`,
-   then record it: `BIN/mcv-status --task <project>/<id> answered q<n> "<answer>"`.
-3. If the worker has moved on (the user answered in its pane), send nothing and record
+   then record it: `BIN/mcv-status --task <project>/<id> answered q<n> "<answer>"`. Send and
+   record the option's words with its letter (`b: once per order`), never the letter alone: the
+   worker and the log must not depend on a card they cannot see.
+3. If the user then says they meant something else, send the correction with `prompt` (the worker
+   may already have acted on the first answer: say what changes), and record it with
+   `BIN/mcv-status --task <project>/<id> amended q<n> "<the corrected answer>"`.
+4. If the worker has moved on (the user answered in its pane), send nothing and record
    `BIN/mcv-status --task <project>/<id> answered q<n> "answered by the user in the worker's pane"`.
-4. If `prompt` refuses because the worker is busy, it did not end its turn after asking. Do not
+5. If `prompt` refuses because the worker is busy, it did not end its turn after asking. Do not
    retry in a loop, and do not just wait: no event would come, since the question already woke
    you. Keep the answer: `BIN/mcv-status --task <project>/<id> pending q<n> "<answer>"`. The
    watcher prints `deliver q<n> <answer>` as soon as the worker stops (at once if it already
@@ -345,7 +359,7 @@ table under "How mcv looks to the user".
 - Keep the journal. The helpers already log every `spawn`, `prompt` and `remove` in
   `$MCV_HOME/<project>/journal.log`. Add a line yourself when something did not go as this skill
   says: a step that took more than one try, an event you could not place, a worker that needed
-  help it should not have, the watcher ending and being restarted. `BIN/mcv-status --journal
+  help it should not have, a watcher that would not start again. `BIN/mcv-status --journal
   <project>[/<id>] "<what happened, in one line>"`. Facts only; it is read later to fix mcv.
 - Keep herdr running while workers run. Whether workers survive when every herdr window is closed
   is untested.

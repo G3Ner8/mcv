@@ -117,10 +117,11 @@ appended in one write each, so writers take no lock. Nothing deletes the journal
 files from `.worktreeinclude`), `created` (UTC).
 
 **status.log** line: `<UTC time>\t<kind>\t<question id or ->\t<text>`, with kind one of
-`needs-decision`, `blocked`, `done`, `failed`, `note` (the worker's), `pending`, `answered` (the
-coordinator's). Text has tabs, newlines and other control characters removed. Question ids are
-`q1`, `q2`, ... per task. A question is open until it has an `answered` line; a `pending` line holds
-an answer the coordinator could not send yet.
+`needs-decision`, `blocked`, `done`, `failed`, `note`, `waiting` (the worker's), `pending`,
+`answered`, `amended` (the coordinator's). Text has tabs, newlines and other control characters
+removed. Question ids are `q1`, `q2`, ... per task. A question is open until it has an `answered`
+line; a `pending` line holds an answer the coordinator could not send yet; an `amended` line, only
+after `answered`, holds a correction sent later, so the log says what the worker was last told.
 
 **Locks** are folders created with `mkdir` (atomic) holding `<pid> <epoch seconds>`. A lock whose
 pid has exited without releasing it is taken over, but only when it is unchanged since read and at
@@ -136,11 +137,14 @@ stale log lock, and overlapping worktree creations in 2 of 5 rounds of 8 spawns.
 left by a killed process is cleared when its pid has exited and it is 2 seconds old, or it has no
 pid and is a minute old (5 seconds for the watcher's).
 
-**Watcher state** (in `$MCV_WATCH_STATE`, a temporary folder by default), one line per task in
-`<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last kind> <gone>
-<owe> <delivered>`, where owe marks a pending answer read while herdr was down, and delivered is
-the log line up to which pending answers were already delivered, so each pending line is delivered
-once.
+**Watcher state** (in `$MCV_WATCH_STATE`, by default `$MCV_HOME/<project>/watch-state`), one line
+per task in `<state>/<project>/<id>`: `<pane> <last state> <change counter> <log lines read> <last
+kind> <gone> <owe> <delivered> <waiting since>`, where owe marks a pending answer read while herdr
+was down, delivered is the log line up to which pending answers were already delivered, so each
+pending line is delivered once, and waiting since is the time of the stop a `waiting` line
+announced (0 when none). The state outlives the watcher: the Monitor tool ends it after 30
+minutes, and `mcv-watch <project> --resume` goes on from it; started without `--resume`, the
+watcher clears it and starts afresh.
 The pane identifies the worker: a task removed and spawned again gets a new pane and a fresh start.
 
 ## Watcher events
@@ -154,10 +158,10 @@ tests read them; the raw kind is in brackets:
 ⧉ <id> · BLOCKED · <text>          (blocked) the worker reports it cannot go on
 ⧉ <id> · DONE · <text>             (done)
 ⧉ <id> · FAILED · <text>           (failed)
-⧉ <id> · NOTE · <text>             (note)
 ⧉ <id> · WAITING · ...             (state blocked) the worker stopped at a dialog
 ⧉ <id> · RESUMED · ...             (state working) it left that dialog: answered in its pane
-⧉ <id> · STOPPED · ...             (state done) a turn ended with no report line since the last event
+⧉ <id> · STOPPED · ...             (state done) a turn ended with no report line since the last event,
+                                   or (state done, wait) a wait it announced outlasted the limit
 ⧉ <id> · DELIVER <qid> · <answer>  (deliver) a pending answer, now that the worker has stopped
 ⧉ <id> · GONE · ...                (gone) the worker no longer runs Claude
 ```
@@ -167,14 +171,22 @@ turn) while an answer is pending, or at once when the answer is recorded after i
 replaces the `STOPPED` of that stop. `RESUMED` is the one change to working that is printed: from
 blocked. Without it a coordinator last told "blocked" kept asking the user to approve a dialog
 they had already answered in the pane (seen in the first real run). `STOPPED` is a turn end, not
-the end of the task: a worker waiting on a sub-agent or a build ends turns too, and was seen to
-end two within five seconds. On its first poll the watcher prints the questions still without an
-answered or pending line, the deliveries owed, and nothing else from the past.
+the end of the task. A worker that waits on a sub-agent or a build has to end its turn: Claude
+Code refuses a long foreground `sleep` and says to wait in the background (measured). It says so
+first with a `waiting` line; the stop that follows prints nothing, unless the worker is still
+stopped `MCV_WATCH_WAIT_LIMIT` seconds later (default 1800), which prints `STOPPED` once.
+`note` and `waiting` lines are never printed: each printed line costs a coordinator turn at its
+full context, and in the second real run notes, restarts and stops during waits were about a
+fifth of the coordinator's cost. On its first poll without `--resume` the watcher prints the
+questions still without an answered or pending line, the deliveries owed, and nothing else from
+the past; with `--resume` it prints only what is new.
 
 ## Git guard
 
 `mcv-status --guard-git`, the worker's PreToolUse hook on Bash, gets the command and its folder
-from the hook's input (`tool_input.command`, `cwd`) and the worker's branch from meta. It splits the
+from the hook's input (`tool_input.command`, `cwd`) and the worker's branch from meta. It removes
+redirections (`2>&1`, `>file`, `2> file`, `&>file`, `<file`, here-documents and here-strings; a
+number counts as a file descriptor only as a word of its own), then splits the
 command at `;`, `&`, `|`, `(`, `)`, `` ` ``, `{`, `}` and newlines, drops quotes, and looks at each
 piece that starts with `git` (after `VAR=value`, `env`, `command`, `exec`, `sudo`, `nohup`;
 following `-C`). It refuses, with a reason that names the worker's branch and `needs-decision`:
