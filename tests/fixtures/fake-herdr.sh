@@ -22,8 +22,20 @@
 # FAKE_FAIL=partial makes worktree create report a workspace id but no pane;
 # FAKE_FAIL=garbage makes it print something that is not JSON (both after
 # creating the worktree).
-#   workspace list           the workspaces worktree create made, with their labels
+#   workspace list           the workspaces worktree create made, with their labels,
+#                            and the main-checkout ones, as herdr lists them
 #   (FAKE_FAIL_REMOVE=1 makes worktree remove fail)
+# Repository workspaces: herdr keeps a worktree's workspace under one for the
+# repository's main checkout and opens that one when it is not open (measured
+# with herdr 0.9.5). worktree create does the same here: ws-main-<repo folder>,
+# kept in FAKE_DIR/main/. FAKE_MAIN_OPEN=<repo path> opens one first, as a
+# user would.
+#   workspace get <ws>       pane_count: FAKE_MAIN_PANES, or 1
+#   pane list --workspace <ws>   one pane, <ws>:p1
+#   pane process-info --pane <p> the shell alone, or with a program in front
+#                                of it when FAKE_MAIN_BUSY=1
+#   workspace close <ws>     closes it
+#   pane read <pane>         FAKE_SCREEN when set
 #   status --json            FAKE_STATUS, or a healthy herdr 0.9.5
 #   integration status       FAKE_INTEG, or "claude: current (v11)"
 #   agent list               FAKE_AGENT_LIST, or no agents
@@ -32,12 +44,21 @@
 set -euo pipefail
 
 D="${FAKE_DIR:?FAKE_DIR not set}"
-mkdir -p "$D/ws"
+mkdir -p "$D/ws" "$D/main"
 printf '%s\n' "$*" >>"$D/calls"
 # FAKE_SILENT=1: fail with status 3 and nothing on stderr, as a killed herdr does.
 [[ "${FAKE_SILENT:-}" != 1 ]] || exit 3
 
 fail() { printf '{"error":{"code":"%s","message":"%s"}}\n' "$1" "$2" >&2; exit 1; }
+
+# A label such as "mcv acme/a" as a file name.
+wsid() { printf 'ws-%s' "$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '-')"; }
+open_main() { # <repo path>
+  local p
+  p="$(cd "$1" && pwd -P)"
+  [[ -f "$D/main/ws-main-${p##*/}" ]] || printf '%s\n' "$p" >"$D/main/ws-main-${p##*/}"
+}
+[[ -z "${FAKE_MAIN_OPEN:-}" ]] || open_main "$FAKE_MAIN_OPEN"
 
 case "${1:-} ${2:-}" in
   "worktree create")
@@ -59,31 +80,62 @@ case "${1:-} ${2:-}" in
       printf 'end %s\n' "$label" >>"$D/order"
       fail git_failed "could not lock config file"
     fi
-    wt="$D/wt/$label"
+    id="$(wsid "$label")"
+    wt="$D/wt/${id#ws-}"
     git -C "$cwd" worktree add -q -b "$branch" "$wt" "$base" >/dev/null 2>&1
-    printf '%s\t%s\n' "$cwd" "$wt" >"$D/ws/ws-$label"
+    printf '%s\t%s\t%s\n' "$cwd" "$wt" "$label" >"$D/ws/$id"
+    open_main "$cwd"
     printf 'end %s\n' "$label" >>"$D/order"
     case "${FAKE_FAIL:-}" in
-      partial) printf '{"result":{"workspace":{"workspace_id":"ws-%s"}}}\n' "$label"; exit 0 ;;
+      partial) printf '{"result":{"workspace":{"workspace_id":"%s"}}}\n' "$id"; exit 0 ;;
       garbage) echo "Segmentation fault"; exit 0 ;;
     esac
-    jq -cn --arg ws "ws-$label" --arg wt "$wt" '{result: {
+    jq -cn --arg ws "$id" --arg wt "$wt" '{result: {
       root_pane: {pane_id: ($ws + ":p1")},
       workspace: {workspace_id: $ws, worktree: {is_linked_worktree: true}},
       worktree: {path: $wt}}}'
     ;;
   "workspace list")
-    for f in "$D"/ws/ws-*; do
-      [[ -f "$f" ]] || continue
-      l="${f##*/ws-}"
-      jq -cn --arg ws "ws-$l" --arg l "$l" '{workspace_id: $ws, label: $l}'
-    done | jq -cs '{result: {workspaces: .}}'
+    {
+      for f in "$D"/main/ws-main-*; do
+        [[ -f "$f" ]] || continue
+        jq -cn --arg ws "${f##*/}" --arg p "$(cat "$f")" \
+          '{workspace_id: $ws, label: ($p | split("/") | last),
+            worktree: {is_linked_worktree: false, checkout_path: $p, repo_root: $p}}'
+      done
+      for f in "$D"/ws/ws-*; do
+        [[ -f "$f" ]] || continue
+        IFS=$'\t' read -r repo wt l <"$f"
+        jq -cn --arg ws "${f##*/}" --arg l "$l" --arg wt "$wt" --arg r "$(cd "$repo" 2>/dev/null && pwd -P)" \
+          '{workspace_id: $ws, label: $l,
+            worktree: {is_linked_worktree: true, checkout_path: $wt, repo_root: $r}}'
+      done
+    } | jq -cs '{result: {workspaces: .}}'
+    ;;
+  "workspace get")
+    [[ -f "$D/main/$3" || -f "$D/ws/$3" ]] || fail workspace_not_found "workspace $3 not found"
+    printf '{"result":{"workspace":{"workspace_id":"%s","pane_count":%s}}}\n' "$3" "${FAKE_MAIN_PANES:-1}"
+    ;;
+  "workspace close")
+    [[ -f "$D/main/$3" ]] || fail workspace_not_found "workspace $3 not found"
+    rm -f "$D/main/$3"
+    echo '{"result":{}}'
+    ;;
+  "pane list")
+    printf '{"result":{"panes":[{"pane_id":"%s:p1"}]}}\n' "$4"
+    ;;
+  "pane process-info")
+    if [[ "${FAKE_MAIN_BUSY:-}" == 1 ]]; then
+      echo '{"result":{"process_info":{"foreground_process_group_id":200,"shell_pid":100}}}'
+    else
+      echo '{"result":{"process_info":{"foreground_process_group_id":100,"shell_pid":100}}}'
+    fi
     ;;
   "worktree remove")
     [[ "${FAKE_FAIL_REMOVE:-}" != 1 ]] || fail internal "worktree remove failed"
     ws="$4"
     [[ -f "$D/ws/$ws" ]] || fail workspace_not_found "workspace $ws not found"
-    IFS=$'\t' read -r repo wt <"$D/ws/$ws"
+    IFS=$'\t' read -r repo wt _ <"$D/ws/$ws"
     git -C "$repo" worktree remove --force "$wt"
     rm -f "$D/ws/$ws"
     echo '{"result":{}}'
@@ -125,7 +177,7 @@ case "${1:-} ${2:-}" in
     if [[ -n "${FAKE_AGENT_LIST:-}" ]]; then printf '%s\n' "$FAKE_AGENT_LIST"; else echo '{"result":{"agents":[]}}'; fi
     ;;
   "pane read")
-    echo "screen of $3"
+    if [[ -n "${FAKE_SCREEN:-}" ]]; then printf '%s\n' "$FAKE_SCREEN"; else echo "screen of $3"; fi
     ;;
   "agent prompt")
     [[ "${FAKE_FAIL:-}" != notready ]] || fail agent_not_ready "$3 is not an active named agent"

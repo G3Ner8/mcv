@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -89,14 +89,17 @@ Skip this skill for:
      machine, and their test runs compete.
 
    Show the whole file, write it only after the user agrees, and mention it is personal until they
-   choose to commit it. Then, if this folder is a git repository and `git check-ignore -q
+   choose to commit it. That message asks about the config alone: no workers, no tasks, no
+   change to a repo's files. A yes to it approves the file and nothing else; the workers are
+   confirmed later, in their own message (Dispatching, step 4). Then, if this folder is a git repository and `git check-ignore -q
    .claude/mcv.json` fails (the file is not ignored), say so in one line and offer, recommending
    the first: add `.claude/mcv.json` to `.git/info/exclude` (this repository, this machine only,
    no change to the team's files); add `**/.claude/mcv.json` to their global git ignore file (every
    project on this machine); or leave it for them to commit. Never edit the project's
    `.gitignore` for this. If a repo has files the workers need that git ignores (a test account's
    `.env`, say), tell the user they can list them in a `.worktreeinclude` file at that repo's root
-   (`.gitignore` syntax); `spawn` copies them into each worktree.
+   (`.gitignore` syntax); `spawn` copies them into each worktree. Creating that file changes the
+   repo, so it is a question of its own, asked after the config is settled.
 
    Then tell the user in one line which permission mode workers will run in. A worker takes it
    from the Claude Code settings files, not from this session's flags: read
@@ -108,7 +111,8 @@ Skip this skill for:
    `-- --permission-mode default`; it then stops at each approval, which the user answers in its
    herdr pane.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
-   tool: `BIN/mcv-watch <project>`. The Monitor tool ends it after a while (30 minutes, seen in
+   tool: `BIN/mcv-watch <project>`, with the description `⧉ mcv · <project>` exactly (it is shown
+   after every event). The Monitor tool ends it after a while (30 minutes, seen in
    use); while workers are still active, start it again, which shows the open questions again
    (relay none twice). Never start a second one for the same project. If it exits at
    once saying a watcher is already running, check your Monitor tasks: if that one is yours, keep
@@ -118,6 +122,11 @@ Skip this skill for:
 ## Apply
 
 ### Dispatching work
+
+The user names the work. If they started this skill without a task (`/mcv` alone), set up what
+the pre-conditions need, then ask what the workers should do. Never pick tasks yourself from a
+plan, a queue, a lots file or a tracker, even one that looks ready: you may say what you see
+there, in one line, but the user chooses.
 
 1. **Pick the repo.** If the user named it, use it. Otherwise infer it from the task (a file path,
    an app name, an issue that names the app). If it is still unclear, ask in one line, with your
@@ -133,8 +142,9 @@ Skip this skill for:
    shape, the absolute path of a sibling repo it should read (a `../other-repo` written in its
    repo's notes does not resolve from a worktree), a related branch. Facts, not a pointer to read a
    whole file.
-4. **Confirm before starting.** Show every worker you are about to start and wait for a yes. The
-   user may rename ids or branches here. When the repos' bases differ, add each worker's base
+4. **Confirm before starting.** Show every worker you are about to start and wait for a yes. This
+   message asks only this; a yes the user gave to anything else (the config, a file change) does
+   not start a worker. The user may rename ids or branches here. When the repos' bases differ, add each worker's base
    to its line (`branch fix/cart-total from origin/develop`); when their contexts differ, say
    which workers get none (`no project notes`). At most `max_workers` (default 2) workers are active at
    once. A worker is active from its `spawn` until it reports `done` or `failed`, is `gone`, or is
@@ -156,10 +166,18 @@ Skip this skill for:
    repository. Claude's own flags go after `--`; `spawn` refuses `--add-dir` and `--settings`
    there (either form), and `--base`/`--context` too. It
    prints the task, worktree, branch, base, context and how many files it copied from
-   `.worktreeinclude`. If it fails, tell the user its one-line reason. If Claude failed to start, `BIN/mcv-herdr.sh read
-   <project>/<id>` shows the screen: describe it. Usually it is Claude's folder trust dialog, whose
+   `.worktreeinclude`. If it fails, tell the user its one-line reason. If Claude failed to start,
+   the reason ends with the last lines of the worker's pane ("its pane shows: ..."); `BIN/mcv-herdr.sh
+   read <project>/<id>` shows more. Describe it. Usually it is Claude's folder trust dialog, whose
    default answer is "No, exit": ask the user to pick "Yes" in the worker's herdr pane, then go on
-   with step 6. It comes once per repository; later workers there start without it. If the user does not want it, offer `remove`.
+   with step 6. It comes once per repository; later workers there start without it. Something the
+   shell asked before Claude started (an update prompt, say) took part of the claude command: tell
+   the user what it asked and how to stop it asking, then `remove` and spawn again. If the user
+   does not want it, offer `remove`.
+
+   herdr keeps each worker's workspace under a workspace for its repository's main checkout,
+   opening one if none is open. The first time you start workers, tell the user in one line:
+   closing that repository workspace in herdr closes its workers with it.
 6. **Send the task.** `BIN/mcv-herdr.sh prompt <project>/<id> "<dispatch, with {task} replaced>"
    --no-wait`. It returns within seconds with the state `working` (or `blocked` if the worker hit a
    dialog at once). Never call `prompt` without `--no-wait`: Claude Code's Bash tool stops waiting
@@ -176,38 +194,99 @@ ask instead, so such a need comes to you as a question like any other.
 
 ### Handling what the watcher reports
 
-Each line from the watcher is one event, tab-separated: time, `<project>/<id>`, then the event.
-When the watcher starts (a new session, or after it was restarted) it first shows every question
-still without an answered or pending line, so nothing asked earlier is lost; an answer still
-pending comes as `deliver` once the worker has stopped. A question whose `<id> #<n>` you
-already relayed in this conversation is the same question: do not ask the user twice.
+Each line from the watcher is one event: `⧉ <id> · <EVENT>[ qN] · <text>`. When the watcher starts
+(a new session, or after it was restarted) it first shows every question still without an
+answered or pending line, so nothing asked earlier is lost; an answer still pending comes as
+`DELIVER` once the worker has stopped. A question whose `<id> #<n>` you already relayed in this
+conversation is the same question: do not ask the user twice.
+
+The Monitor tool cuts a long event short and ends it with `...(truncated)`. The full line is in
+the task's `status.log` (`$MCV_HOME/<project>/tasks/<id>/status.log`, the `needs-decision` line
+with that id, say): read it there before relaying, and never relay a cut text.
 
 | Event | What to do |
 |---|---|
-| `needs-decision qN <text>` | Relay it to the user as a labelled question (below). |
-| `blocked - <text>` (a log line) | The worker says it cannot continue. Tell the user why and ask what to do. |
-| `state blocked` | The worker stopped at a dialog on its screen. `read` it, describe in plain words what it wants (which command, which file, which question), and ask the user. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
-| `state done` | The worker's turn ended without a report. `read` its screen and summarise what it said. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. |
-| `done - <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
-| `failed - <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
-| `note - <text>` | Mention it in one line. |
-| `deliver qN <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 4 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `deliver` comes once per pending line. |
-| `gone -` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
+| `QUESTION qN · <text>` | Relay it to the user as a question card (below). |
+| `BLOCKED · <text>` | The worker says it cannot continue. Tell the user why and ask what to do. |
+| `WAITING` | The worker stopped at a dialog on its screen. `read` it, describe in plain words what it wants (which command, which file, which question), and ask the user. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
+| `RESUMED` | The dialog is gone: the user answered it in the worker's pane. Stop asking them about it; say in one line that the worker went on. |
+| `STOPPED` | The worker's turn ended without a report. This is not "finished": a worker waiting on background work (a sub-agent, a build) ends turns too, and its last `NOTE` says so. `read` its screen. If it is waiting on something, say nothing, or one line if the user is waiting on it. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. |
+| `DONE · <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
+| `FAILED · <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
+| `NOTE · <text>` | Mention it in one line, or not at all if it changes nothing for the user. |
+| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 4 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `DELIVER` comes once per pending line. |
+| `GONE` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
 
-If `prompt` says a worker is not running Claude any more, handle it like `gone -`: `read` its screen
+If `prompt` says a worker is not running Claude any more, handle it like `GONE`: `read` its screen
 for what it said last, tell the user, and offer `remove`.
-
-**Labelling questions.** Label each question `<id> #<n>`, with repo and branch after it, so that two
-workers in the same repo never look alike. Keep the worker's recommendation if it gave one.
-
-```
-cart-fix #1 (web, fix/cart-total)
-  Add the surcharge per drink, or once per order?
-  Recommended: per drink, since that is how the till prints it on the receipt.
-```
 
 In this version every question goes to the user. Do not answer one yourself, even when you think
 you know.
+
+### How mcv looks to the user
+
+Everything mcv shows the user carries the mark `⧉`, so it stands out from the rest of the
+conversation. The body of a message is in the user's language; the mark, the ids, the event words
+and the reply line stay as written here. No boxes or rules drawn around a message: characters
+with combining marks break their alignment.
+
+**Relaying.** Open each relayed event with its header line, then the details indented by two
+spaces, then a blank line and what the user does: the exact reply to type, where to click, or
+"nothing to do". Events that arrive together go in one message, one block each.
+
+```
+⧉ cart-fix · QUESTION #1
+  web · fix/cart-total
+
+  Add the surcharge per drink, or once per order?
+
+  1  per drink, as the till prints it on the receipt      ← recommended
+  2  once per order
+
+  Reply  cart-fix #1 1
+```
+
+```
+⧉ cart-fix · WAITING
+  Wants to run: git push -u origin fix/cart-total
+
+  Approve or deny it in the herdr pane "mcv shop/cart-fix". I never approve for you.
+```
+
+```
+⧉ cart-fix · DONE
+  3 files staged · tests pass · commit message drafted
+
+  Next  say "commit" when ready
+```
+
+```
+⧉ cart-fix · FAILED · spawn
+  Claude did not start. Last lines of its pane:
+    Would you like to update? [Y/n]
+    zsh: command not found: laude
+
+  Cause      the shell asked about an update before claude started
+  Suggested  stop that prompt, then start the worker again
+```
+
+Label questions `<id> #<n>`, with repo and branch on the line under the header, so two workers in
+the same repo never look alike. Keep the worker's recommendation and mark it. If a question holds
+two decisions, number them `#<n>a` and `#<n>b` in the card and ask for both.
+
+**Commands.** Give every helper call a Bash description that starts with `mcv:` and says what it
+does in words: `mcv: start worker cart-fix`, `mcv: send answer to cart-fix #1`, `mcv: read
+cart-fix's screen`. Never leave the description to show the helper's full path.
+
+**Where things stand.** One header line, then a table:
+
+```
+⧉ mcv · shop · 2 workers
+
+  worker       repo  branch              state      since  you
+  cart-fix     web   fix/cart-total      QUESTION   3m     answer #1
+  loyalty-csv  api   feat/loyalty-csv    working    12m    —
+```
 
 ### Sending an answer
 
@@ -231,7 +310,8 @@ you know.
 `<project>-<id>`. Tasks are the folders under `$MCV_HOME/<project>/tasks/` (`MCV_HOME` defaults to
 `~/.claude/mcv`). A question is open
 when its `needs-decision` line in that task's `status.log` has no `answered` line with the same id.
-Report per worker: id, repo and branch, state, open questions.
+Report per worker: id, repo and branch, state, since when, and what the user has to do, as the
+table under "How mcv looks to the user".
 
 ## Verification
 
@@ -246,8 +326,11 @@ Report per worker: id, repo and branch, state, open questions.
 ## Rollback
 
 - A worker: `BIN/mcv-herdr.sh remove <project>/<id>`, only when the user agrees. It closes the
-  worker, deletes its worktree folder and task state, and keeps the branch as a local branch and
-  the task's record in the folder it prints as `history`. It
+  worker, deletes its worktree folder and task state, and keeps the task's record in the folder it
+  prints as `history`. It keeps the branch as a local branch (`branch_kept`), unless the branch
+  never moved from where it started, has no upstream and no remote has it (`branch_deleted`):
+  then it held no work. After the repository's last worker, it closes the repository workspace
+  herdr opened for the workers, if nothing runs in it (`closed_workspace`). It
   refuses while the worker is working or at a dialog, and while the worktree has uncommitted or
   untracked files; then tell the user, whose call it is.
 - The config: delete `.claude/mcv.json`.

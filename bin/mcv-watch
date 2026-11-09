@@ -10,23 +10,35 @@
 #                                  (lock: $MCV_HOME/<project>/watch.lock)
 #   mcv-watch <project> --once     one poll, keeping state in MCV_WATCH_STATE (for tests)
 #
-# Printed, one line per event, tab-separated:
-#   <time> <project>/<id> state blocked         a worker stopped at an approval or question dialog
-#   <time> <project>/<id> state done            a worker's turn ended (see below)
-#   <time> <project>/<id> <kind> <qid|-> <text> a new line in the worker's status log
-#   <time> <project>/<id> deliver <qid> <text>  an answer kept as pending, now that the
-#                                               worker has stopped: send it, then record it
-#   <time> <project>/<id> gone -                the worker's pane is no longer there
-#                                               (not while spawn is still starting it)
+# Printed, one line per event: "⧉ <id> · <EVENT>[ <qid>] · <text>". The mark
+# and the fixed words make mcv's lines easy to find among others in a
+# coordinator's session; the project is the one this watcher was started for.
+#   ⧉ <id> · QUESTION <qid> · <text>   the worker asks the user (needs-decision)
+#   ⧉ <id> · BLOCKED · <text>          the worker reports it cannot go on
+#   ⧉ <id> · DONE · <text>             the worker reports its task finished
+#   ⧉ <id> · FAILED · <text>           the worker reports its task failed
+#   ⧉ <id> · NOTE · <text>             a progress note
+#   ⧉ <id> · WAITING · ...             it stopped at an approval or question dialog in its pane
+#   ⧉ <id> · RESUMED · ...             it left that dialog and is working again
+#   ⧉ <id> · STOPPED · ...             its turn ended with no report (see below): read its screen
+#   ⧉ <id> · DELIVER <qid> · <answer>  an answer kept as pending, now that the worker
+#                                      has stopped: send it, then record it
+#   ⧉ <id> · GONE · ...                the worker's pane is no longer there (not while
+#                                      spawn is still starting it)
+# A log kind this list does not name is printed in capitals the same way.
+# MCV_WATCH_RAW=1 prints the same events tab-separated instead, for scripts
+# and tests: "<time> <project>/<id> <kind> <qid|-> <text>", where kind is a
+# log kind, "deliver", "gone", or "state" with blocked, working or done.
 #
-# Not printed: changes to working, idle or unknown; the coordinator's own
+# Not printed: changes to idle or unknown, and to working except from
+# blocked; the coordinator's own
 # "answered" and "pending" lines; anything already in a log when the watcher
 # starts, except questions that have no answered or pending line yet, which
 # are printed once so a coordinator started later still sees them, and
-# pending answers, which come as deliver once the worker has stopped.
-# "state done" is also skipped when the worker's last log line since its
+# pending answers, which come as DELIVER once the worker has stopped.
+# STOPPED is also skipped when the worker's last log line since its
 # previous state event was needs-decision, blocked, done or failed, because
-# that line already woke the coordinator, and when a deliver goes out for
+# that line already woke the coordinator, and when a DELIVER goes out for
 # the same stop. A turn that ends with no log line, or after only a note,
 # does print it: then the coordinator reads the screen.
 #
@@ -65,6 +77,30 @@ esac
 [[ "$INTERVAL" =~ ^[0-9]+(\.[0-9]+)?$ && ! "$INTERVAL" =~ ^0+(\.0+)?$ ]] \
   || usage "MCV_WATCH_INTERVAL must be a number of seconds above 0, got '$INTERVAL'"
 tasks="$MCV_HOME/$project/tasks"
+
+# Print one event, given as its tab-separated raw form (see the header).
+emit() {
+  if [[ "${MCV_WATCH_RAW:-}" == 1 ]]; then
+    printf '%s\n' "$1"
+    return
+  fi
+  local ts task kind f4 f5 label text=""
+  IFS=$'\t' read -r ts task kind f4 f5 <<<"$1"
+  case "$kind" in
+    state)
+      case "$f4" in
+        blocked) label=WAITING; text="a dialog is open in its pane" ;;
+        working) label=RESUMED; text="it left the dialog and is working again" ;;
+        done)    label=STOPPED; text="its turn ended with no report; read its screen" ;;
+        *)       label="$(printf '%s' "$f4" | tr '[:lower:]' '[:upper:]')" ;;
+      esac ;;
+    gone)           label=GONE; text="its pane is no longer there" ;;
+    deliver)        label="DELIVER $f4"; text="$f5" ;;
+    needs-decision) label="QUESTION $f4"; text="$f5" ;;
+    *)              label="$(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]')"; text="$f5" ;;
+  esac
+  printf '⧉ %s · %s%s\n' "${task#*/}" "$label" "${text:+ · $text}"
+}
 
 # One poll. The state folder has one subfolder per project, so watchers of
 # two projects can share it; per task it keeps one line:
@@ -160,7 +196,8 @@ poll() {
           open="$(grep -vx '#owe' <<<"$open" || true)"
         fi
         if [[ -n "$open" ]]; then
-          printf '%s\n' "$open"
+          local oline
+          while IFS= read -r oline; do emit "$oline"; done <<<"$open"
           lastkind=needs-decision
         fi
       fi
@@ -183,7 +220,7 @@ poll() {
           owe=1
           continue
         fi
-        printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$task" "$kind" "$qid" "$text"
+        emit "$(printf '%s\t%s\t%s\t%s\t%s' "$ts" "$task" "$kind" "$qid" "$text")"
         lastkind="$kind"
       done < <(tail -n +"$((offset + 1))" "$log" | head -n "$((lines - offset))")
       offset="$lines"
@@ -201,7 +238,7 @@ poll() {
       if [[ -e "$tdir/starting" && "$prev" == - ]]; then
         :
       else
-        (( gone )) || printf '%s\t%s\tgone\t-\n' "$now" "$task"
+        (( gone )) || emit "$(printf '%s\t%s\tgone\t-' "$now" "$task")"
         gone=1
       fi
     else
@@ -231,7 +268,7 @@ poll() {
           dl="$lines"
           if [[ -n "$pend" ]]; then
             while IFS= read -r line; do
-              printf '%s\t%s\tdeliver\t%s\n' "$now" "$task" "$line"
+              emit "$(printf '%s\t%s\tdeliver\t%s' "$now" "$task" "$line")"
             done <<<"$pend"
             delivered=1
           fi
@@ -246,9 +283,15 @@ poll() {
         elif [[ "$status" == "done" ]] && [[ "$lastkind" =~ ^(needs-decision|blocked|done|failed)$ ]]; then
           :
         else
-          printf '%s\t%s\tstate\t%s\n' "$now" "$task" "$status"
+          emit "$(printf '%s\t%s\tstate\t%s' "$now" "$task" "$status")"
         fi
         lastkind=-
+      fi
+      # The user answered a dialog in the worker's pane: without this line
+      # the coordinator, last told it was blocked, would go on asking the
+      # user to approve something that is no longer on the screen.
+      if [[ "$prev" == blocked && "$status" == working ]]; then
+        emit "$(printf '%s\t%s\tstate\tworking' "$now" "$task")"
       fi
       prev="$status"
       prev_seq="$seq"

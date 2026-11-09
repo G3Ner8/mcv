@@ -129,16 +129,18 @@ out="$("$H" remove acme/t3 2>&1)"; rc=$?
 expect "remove takes the same worker once it is idle" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 
 # remove after the user closed the worker's workspace: git removes the
-# worktree, the task goes, the branch stays.
+# worktree, the task goes, the branch stays (it holds a commit).
 wt="$(jq -r .worktree "$(meta acme t1)")"
 ws="$(jq -r .workspace_id "$(meta acme t1)")"
+git -C "$wt" commit -q --allow-empty -m "worker's work"
 rm -f "$FAKE_DIR/ws/$ws"
 out="$("$H" remove acme/t1 2>&1)"; rc=$?
 expect "remove works after the workspace was closed" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 expect "its worktree folder is gone" '[[ ! -d "$wt" ]]'
 expect "git no longer lists the worktree" '! git -C "$repo" worktree list | grep -qF "$wt"'
 expect "its task state is gone" '[[ ! -e "$MCV_HOME/acme/tasks/t1" ]]'
-expect "its branch is kept" 'git -C "$repo" show-ref --verify --quiet refs/heads/fix/t1'
+expect "its branch, which holds a commit, is kept" \
+  '[[ "$(jq -r .branch_kept <<<"$out")" == fix/t1 ]] && git -C "$repo" show-ref --verify --quiet refs/heads/fix/t1' "$out"
 
 # remove when the worktree folder was deleted by hand as well.
 wt="$(jq -r .worktree "$(meta acme t2)")"
@@ -205,6 +207,83 @@ out="$("$H" spawn solo s2 "$repo" fix/s2 2>&1)"
 wt="$(jq -r .worktree "$(meta solo s2)")"
 "$H" remove solo/s2 >/dev/null 2>&1
 expect "herdr's folder that still holds other worktrees stays" '[[ -d "$(dirname "$wt")" ]]'
+
+# A failed start says what the pane shows: herdr types the claude command
+# at the shell prompt, and something the shell asked first can take it.
+export FAKE_DIR="$root/fake3"
+out="$(FAKE_FAIL=start FAKE_SCREEN=$'$ \nWould you like to update? [Y/n] c\nzsh: command not found: laude\n\n' \
+  "$H" spawn solo f1 "$repo" fix/f1 2>&1)"; rc=$?
+expect "a failed start is one line naming herdr's error and the pane's last lines" \
+  '[[ $rc -eq 1 && $(printf "%s\n" "$out" | wc -l) -eq 1 && "$out" == *"claude did not start; its pane shows: "*"update? [Y/n] c / zsh: command not found: laude" ]]' "rc=$rc $out"
+expect "the journal has the pane's lines too" 'grep -qF "command not found: laude" "$j"' "$(tail -2 "$j")"
+"$H" remove solo/f1 >/dev/null 2>&1
+
+# remove deletes a branch that never moved from its base, has no upstream
+# and is on no remote: it holds no work, and would block a new spawn of the
+# same name. Any other branch is kept.
+out="$("$H" spawn solo b1 "$repo" fix/b1 2>&1)"
+out="$("$H" remove solo/b1 2>&1)"; rc=$?
+expect "remove deletes a branch with no commits past its base" \
+  '[[ $rc -eq 0 && "$(jq -r .branch_deleted <<<"$out")" == fix/b1 ]] && ! git -C "$repo" show-ref --verify --quiet refs/heads/fix/b1' "rc=$rc $out"
+expect "the journal says the branch was deleted" 'tail -1 "$j" | grep -qF "branch fix/b1 deleted (no commits past its base)"' "$(tail -1 "$j")"
+# (A new id: the fake herdr keeps every agent name it started.)
+out="$("$H" spawn solo b1b "$repo" fix/b1 2>&1)"; rc=$?
+expect "the same branch name can be spawned again" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+git -C "$repo" config branch.fix/b1.remote origin
+git -C "$repo" config branch.fix/b1.merge refs/heads/fix/b1
+out="$("$H" remove solo/b1b 2>&1)"; rc=$?
+expect "a branch with an upstream is kept, commits or not" \
+  '[[ $rc -eq 0 && "$(jq -r .branch_kept <<<"$out")" == fix/b1 ]]' "rc=$rc $out"
+git -C "$repo" branch -D -q fix/b1
+"$H" spawn solo b2 "$repo" fix/b2 >/dev/null 2>&1
+git -C "$repo" update-ref refs/remotes/origin/fix/b2 HEAD
+out="$("$H" remove solo/b2 2>&1)"; rc=$?
+expect "a branch a remote has is kept" '[[ $rc -eq 0 && "$(jq -r .branch_kept <<<"$out")" == fix/b2 ]]' "rc=$rc $out"
+"$H" spawn solo b3 "$repo" fix/b3 >/dev/null 2>&1
+jq 'del(.base_sha)' "$(meta solo b3)" >"$root/m" && mv "$root/m" "$(meta solo b3)"
+out="$("$H" remove solo/b3 2>&1)"; rc=$?
+expect "a task from before 0.2.1 (no base commit) keeps its branch" \
+  '[[ $rc -eq 0 && "$(jq -r .branch_kept <<<"$out")" == fix/b3 ]]' "rc=$rc $out"
+
+# The worker's workspace is labelled as mcv's in herdr's sidebar.
+"$H" spawn solo l1 "$repo" fix/l1 >/dev/null 2>&1
+expect "the worker's workspace label is 'mcv solo/l1'" \
+  'herdr workspace list | jq -e ".result.workspaces[] | select(.label == \"mcv solo/l1\")" >/dev/null'
+"$H" remove solo/l1 >/dev/null 2>&1
+
+# herdr opens a workspace for the repository's main checkout when it has none
+# open. The last remove in the repository closes the one a spawn opened, if
+# it is still as herdr opened it; one the user had open is never closed.
+export FAKE_DIR="$root/fake4"
+mainws() { herdr workspace list | jq -r '.result.workspaces[] | select(.worktree.is_linked_worktree == false) | .workspace_id'; }
+"$H" spawn solo w1 "$repo" fix/w1 >/dev/null 2>&1
+"$H" spawn solo w2 "$repo" fix/w2 >/dev/null 2>&1
+expect "spawn made herdr open the repository's workspace" '[[ -n "$(mainws)" ]]' "$(mainws)"
+out="$("$H" remove solo/w1 2>&1)"
+expect "it stays while another worker of the repository is open" \
+  '[[ -n "$(mainws)" && "$(jq -r ".closed_workspace // empty" <<<"$out")" == "" ]]' "$out"
+out="$("$H" remove solo/w2 2>&1)"
+expect "the last remove closes it and says so" \
+  '[[ -z "$(mainws)" && "$(jq -r .closed_workspace <<<"$out")" == ws-main-repo ]]' "$out"
+expect "the journal names the closed workspace" 'tail -1 "$j" | grep -qF "closed repository workspace ws-main-repo"' "$(tail -1 "$j")"
+"$H" spawn solo w3 "$repo" fix/w3 >/dev/null 2>&1
+out="$(FAKE_MAIN_BUSY=1 "$H" remove solo/w3 2>&1)"
+expect "one with a program running in its shell stays open" '[[ -n "$(mainws)" ]]' "$out"
+"$H" spawn solo w4 "$repo" fix/w4 >/dev/null 2>&1
+out="$(FAKE_MAIN_PANES=2 "$H" remove solo/w4 2>&1)"
+expect "one the user split into more panes stays open" '[[ -n "$(mainws)" ]]' "$out"
+"$H" spawn solo w5 "$repo" fix/w5 >/dev/null 2>&1
+out="$("$H" remove solo/w5 2>&1)"
+expect "once it is idle again, a later remove closes it" '[[ -z "$(mainws)" ]]' "$out"
+export FAKE_DIR="$root/fake5"
+"$H" spawn solo w6 "$repo" fix/w6 >/dev/null 2>&1
+herdr workspace close ws-main-repo >/dev/null
+out="$("$H" remove solo/w6 2>&1)"; rc=$?
+expect "one the user closed already is fine" '[[ $rc -eq 0 && "$(jq -r ".closed_workspace // empty" <<<"$out")" == "" ]]' "rc=$rc $out"
+export FAKE_DIR="$root/fake6"
+out="$(FAKE_MAIN_OPEN="$repo" "$H" spawn solo w7 "$repo" fix/w7 2>&1)"
+out="$("$H" remove solo/w7 2>&1)"
+expect "the user's own repository workspace is never closed" '[[ -n "$(mainws)" ]]' "$out"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

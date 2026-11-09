@@ -21,6 +21,9 @@ trap 'rm -rf "$root"' EXIT
 export MCV_HOME="$root/home" MCV_HERDR="$HERE/fixtures/stub-herdr.sh" STUB_AGENTS="$root/agents"
 export MCV_WATCH_STATE="$root/state"
 mkdir -p "$MCV_WATCH_STATE"
+# The checks below read the raw, tab-separated form; the readable form the
+# coordinator sees is checked at the end.
+export MCV_WATCH_RAW=1
 
 # A task as spawn leaves it: a meta file naming its pane.
 task() { # <id> <pane>
@@ -412,6 +415,60 @@ sleep 7
 expect "a leftover takeover lock is cleared and the stale lock taken over" \
   'kill -0 "$wpid" 2>/dev/null && [[ "$(cat "$MCV_HOME/acme/watch.lock/pid")" == "$wpid" ]]'
 kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+
+# A dialog answered in the worker's pane: blocked, then working again. The
+# coordinator hears that it moved on, so it stops asking for an approval no
+# longer on screen. Working after any other state stays quiet.
+rm -rf "$MCV_HOME/acme/tasks" "$MCV_WATCH_STATE"/acme
+task r w:p9
+agents "w:p9,working,1,acme-r"
+poll >/dev/null
+agents "w:p9,blocked,2,acme-r"
+out="$(poll)"
+expect "blocked is reported" '[[ "$out" == *"acme/r"$'"'"'\t'"'"'"state"$'"'"'\t'"'"'"blocked" ]]' "$out"
+agents "w:p9,working,3,acme-r"
+out="$(poll)"
+expect "blocked then working: reported as state working" \
+  '[[ $(count "$out") -eq 1 && "$out" == *"acme/r"$'"'"'\t'"'"'"state"$'"'"'\t'"'"'"working" ]]' "$out"
+agents "w:p9,done,4,acme-r"
+poll >/dev/null
+agents "w:p9,working,5,acme-r"
+out="$(poll)"
+expect "done then working: nothing" '[[ -z "$out" ]]' "$out"
+
+# The readable form, as the coordinator sees it.
+unset MCV_WATCH_RAW
+rm -rf "$MCV_HOME/acme/tasks" "$MCV_WATCH_STATE"/acme
+task v w:p8
+agents "w:p8,working,1,acme-v"
+poll >/dev/null
+say v needs-decision "Session or query string?"
+say v note "halfway"
+say v "done" "admin!221 opened, not merged"
+out="$(poll)"
+expect "readable: a question carries its id" \
+  '[[ "$(sed -n 1p <<<"$out")" == "⧉ v · QUESTION q1 · Session or query string?" ]]' "$out"
+expect "readable: a note" '[[ "$(sed -n 2p <<<"$out")" == "⧉ v · NOTE · halfway" ]]' "$out"
+expect "readable: done" '[[ "$(sed -n 3p <<<"$out")" == "⧉ v · DONE · admin!221 opened, not merged" ]]' "$out"
+agents "w:p8,blocked,2,acme-v"
+out="$(poll)"
+expect "readable: a dialog is WAITING" '[[ "$out" == "⧉ v · WAITING · a dialog is open in its pane" ]]' "$out"
+agents "w:p8,working,3,acme-v"
+out="$(poll)"
+expect "readable: leaving it is RESUMED" '[[ "$out" == "⧉ v · RESUMED · "* ]]' "$out"
+agents "w:p8,done,4,acme-v"
+out="$(poll)"
+expect "readable: a turn end with no report is STOPPED, telling to read the screen" \
+  '[[ "$out" == "⧉ v · STOPPED · "*"read its screen" ]]' "$out"
+"$STATUS" --task acme/v pending q1 "query string" >/dev/null
+agents "w:p8,working,5,acme-v"
+poll >/dev/null
+agents "w:p8,done,6,acme-v"
+out="$(poll)"
+expect "readable: a pending answer is DELIVER with its id" '[[ "$out" == "⧉ v · DELIVER q1 · query string" ]]' "$out"
+agents ""
+out="$(poll)"
+expect "readable: GONE" '[[ "$out" == "⧉ v · GONE · "* ]]' "$out"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]
