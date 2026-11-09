@@ -72,15 +72,17 @@ agents "w:p1,done,4,acme-a|w:p2,done,4,acme-b|w:p3,blocked,2,acme-c"
 out="$(poll)"
 expect "turn end after a question in an earlier poll: no event" '[[ -z "$out" ]]' "$out"
 
-# note, then the turn ends: two events.
+# A note is for the status table, not a wake: alone it prints nothing, and a
+# turn that ends after only a note is still a stop to look at.
 agents "w:p1,working,5,acme-a|w:p2,done,4,acme-b|w:p3,blocked,2,acme-c"
 poll >/dev/null
 say a note "halfway"
+out="$(poll)"
+expect "a note prints nothing" '[[ -z "$out" ]]' "$out"
 agents "w:p1,done,6,acme-a|w:p2,done,4,acme-b|w:p3,blocked,2,acme-c"
 out="$(poll)"
-expect "note then turn end: two events" '[[ $(count "$out") -eq 2 ]]' "$out"
-expect "note comes first, then state done" \
-  '[[ "$(printf "%s\n" "$out" | cut -f3 | tr "\n" " ")" == "note state " ]]' "$out"
+expect "note then turn end: one event, state done" \
+  '[[ $(count "$out") -eq 1 && "$out" == *"state"$'"'"'\t'"'"'"done" ]]' "$out"
 
 # A turn that ends with no log line at all: one state done (the safety net).
 agents "w:p1,working,7,acme-a|w:p2,done,4,acme-b|w:p3,blocked,2,acme-c"
@@ -110,6 +112,9 @@ expect "blocked is printed" '[[ $(count "$out") -eq 1 && "$out" == *"state"$'"'"
 env -u MCV_TASK "$STATUS" --task acme/a answered q1 "session" >/dev/null
 out="$(poll)"
 expect "answered lines are not printed" '[[ -z "$out" ]]' "$out"
+env -u MCV_TASK "$STATUS" --task acme/a amended q1 "query string" >/dev/null
+out="$(poll)"
+expect "amended lines are not printed" '[[ -z "$out" ]]' "$out"
 
 # A pane that disappears: gone, once.
 agents "w:p1,blocked,12,acme-a|w:p2,done,4,acme-b"
@@ -121,9 +126,9 @@ expect "gone is printed once" '[[ -z "$out" ]]' "$out"
 # A task spawned after the watcher started: its log is followed from the start.
 task d w:p4
 agents "w:p1,blocked,12,acme-a|w:p2,done,4,acme-b|w:p4,idle,1,acme-d"
-say d note "first words"
+say d blocked "first words"
 out="$(poll)"
-expect "new task: its first log line is printed" '[[ "$out" == *"acme/d"$'"'"'\t'"'"'"note"$'"'"'\t'"'"'"-"$'"'"'\t'"'"'"first words" ]]' "$out"
+expect "new task: its first log line is printed" '[[ "$out" == *"acme/d"$'"'"'\t'"'"'"blocked"$'"'"'\t'"'"'"-"$'"'"'\t'"'"'"first words" ]]' "$out"
 
 # Every line: five tab-separated fields for log events, four for state events.
 say d failed "giving up"
@@ -163,26 +168,26 @@ expect "respawned id: the new worker's question is printed" '[[ "$out" == *"need
 say f note x; say f note y
 poll >/dev/null
 printf '' >"$MCV_HOME/acme/tasks/f/status.log"
-say f note "after truncation"
+say f blocked "after truncation"
 out="$(poll)"
 expect "truncated log: its new line is printed" '[[ "$out" == *"after truncation" ]]' "$out"
 
 # A damaged state line or a damaged meta does not stop the watcher.
 : >"$MCV_WATCH_STATE/acme/f"
-say d note "still here"
+say d blocked "still here"
 out="$(poll 2>"$root/err")"; rc=$?
 expect "damaged state: the poll still succeeds" '[[ $rc -eq 0 ]]' "rc=$rc"
 expect "damaged state: other tasks still report" '[[ "$out" == *"still here" ]]' "$out"
 expect "damaged state: a warning on stderr" 'grep -q "acme/f: state was damaged" "$root/err"' "$(cat "$root/err")"
 mkdir -p "$MCV_HOME/acme/tasks/g"
 echo 'not json' >"$MCV_HOME/acme/tasks/g/meta"
-say d note "and here"
+say d blocked "and here"
 out="$(poll 2>&1)"; rc=$?
 expect "damaged meta: the poll still succeeds and reports others" '[[ $rc -eq 0 && "$out" == *"and here" ]]' "rc=$rc $out"
 rm -rf "$MCV_HOME/acme/tasks/g"
 
 # herdr failing: log lines are still passed on; the warning comes once.
-say d note "herdr is down"
+say d blocked "herdr is down"
 out="$(STUB_DOWN=1 poll 2>"$root/err")"; rc=$?
 expect "herdr down: log lines still printed" '[[ $rc -eq 0 && "$out" == *"herdr is down" ]]' "rc=$rc $out"
 expect "herdr down: one warning" 'grep -q "worker states unavailable" "$root/err"' "$(cat "$root/err")"
@@ -233,9 +238,9 @@ if [[ "$(id -u)" -ne 0 ]]; then
   task i w:p9
   agents "w:p8,done,5,acme-h|w:p9,idle,1,acme-i"
   poll >/dev/null 2>&1
-  say i note "unreadable soon"
+  say i blocked "unreadable soon"
   chmod 000 "$MCV_HOME/acme/tasks/i/status.log"
-  say h note "still flowing"
+  say h blocked "still flowing"
   out="$(poll 2>&1)"; rc=$?
   chmod 600 "$MCV_HOME/acme/tasks/i/status.log"
   expect "an unreadable log does not stop the watcher" '[[ $rc -eq 0 && "$out" == *"still flowing" ]]' "rc=$rc $out"
@@ -437,6 +442,87 @@ out="$(poll)"
 expect "done then working: nothing" '[[ -z "$out" ]]' "$out"
 
 # The readable form, as the coordinator sees it.
+# A worker that ends its turn to wait on background work says so with
+# waiting. That stop is expected and wakes nobody, unless the worker is still
+# stopped after MCV_WATCH_WAIT_LIMIT seconds: then it is a stuck wait, said
+# once. MCV_WATCH_NOW stands in for the clock.
+export MCV_WATCH_STATE="$root/state3"
+mkdir -p "$MCV_WATCH_STATE"
+rm -rf "$MCV_HOME/acme/tasks"
+export MCV_WATCH_WAIT_LIMIT=600
+task w w:p10
+agents "w:p10,working,1,acme-w"
+MCV_WATCH_NOW=1000 poll >/dev/null
+say w waiting "qa pair, about 15 minutes"
+out="$(MCV_WATCH_NOW=1000 poll)"
+expect "waiting prints nothing" '[[ -z "$out" ]]' "$out"
+agents "w:p10,done,2,acme-w"
+out="$(MCV_WATCH_NOW=1010 poll)"
+expect "turn end after waiting: no STOPPED" '[[ -z "$out" ]]' "$out"
+agents "w:p10,idle,2,acme-w"
+out="$(MCV_WATCH_NOW=1500 poll)"
+expect "still waiting within the limit: nothing" '[[ -z "$out" ]]' "$out"
+out="$(MCV_WATCH_NOW=1611 poll)"
+expect "still stopped past the limit: one stuck-wait event" \
+  '[[ $(count "$out") -eq 1 && "$out" == *"state"$'"'"'\t'"'"'"done"$'"'"'\t'"'"'"wait" ]]' "$out"
+out="$(MCV_WATCH_NOW=2500 poll)"
+expect "the stuck wait is said once" '[[ -z "$out" ]]' "$out"
+# Woken by its background job, it works, then stops with no report: a stop.
+agents "w:p10,working,3,acme-w"
+MCV_WATCH_NOW=2600 poll >/dev/null
+agents "w:p10,done,4,acme-w"
+out="$(MCV_WATCH_NOW=2610 poll)"
+expect "after the wait, a silent stop is STOPPED" \
+  '[[ $(count "$out") -eq 1 && "$out" == *"state"$'"'"'\t'"'"'"done" ]]' "$out"
+# A wait that ends early: woken within the limit, it waits again; nothing.
+agents "w:p10,working,5,acme-w"
+MCV_WATCH_NOW=2700 poll >/dev/null
+say w waiting "build"
+agents "w:p10,done,6,acme-w"
+MCV_WATCH_NOW=2710 poll >/dev/null
+agents "w:p10,working,7,acme-w"
+MCV_WATCH_NOW=2800 poll >/dev/null
+say w waiting "build, second half"
+agents "w:p10,done,8,acme-w"
+out="$(MCV_WATCH_NOW=2810 poll)"
+expect "a second wait in a row: nothing" '[[ -z "$out" ]]' "$out"
+out="$(MCV_WATCH_NOW=3300 poll)"
+expect "the limit counts from the latest stop" '[[ -z "$out" ]]' "$out"
+# A report after a wait is printed as usual and ends the wait.
+say w "done" "pair clean"
+out="$(MCV_WATCH_NOW=3500 poll)"
+expect "a report during a wait is printed" '[[ $(count "$out") -eq 1 && "$out" == *"pair clean" ]]' "$out"
+out="$(MCV_WATCH_NOW=9000 poll)"
+expect "no stuck wait after the report" '[[ -z "$out" ]]' "$out"
+unset MCV_WATCH_WAIT_LIMIT
+
+# A watcher restarted with --resume (the Monitor tool ended the last one)
+# carries on where it stopped: nothing is shown again. Started without it,
+# as for a new coordinator, the open questions are shown once more.
+rm -rf "$MCV_HOME/acme/tasks"
+task r w:p11
+agents "w:p11,done,1,acme-r"
+say r needs-decision "open question?"
+runw() { # <output file> [--resume]
+  MCV_WATCH_INTERVAL=0.2 env -u MCV_WATCH_STATE "$W" acme ${2:+"$2"} >"$1" 2>/dev/null &
+  local p=$!
+  sleep 1
+  kill -TERM "$p"; wait "$p" 2>/dev/null
+}
+runw "$root/r1.out"
+expect "first watcher shows the open question" 'grep -q "open question?" "$root/r1.out"' "$(cat "$root/r1.out")"
+runw "$root/r2.out" --resume
+expect "resumed watcher shows nothing again" '[[ ! -s "$root/r2.out" ]]' "$(cat "$root/r2.out")"
+say r blocked "new since"
+runw "$root/r3.out" --resume
+expect "resumed watcher shows what is new" \
+  'grep -q "new since" "$root/r3.out" && ! grep -q "open question?" "$root/r3.out"' "$(cat "$root/r3.out")"
+runw "$root/r4.out"
+expect "a fresh watcher shows the open question again" 'grep -q "open question?" "$root/r4.out"' "$(cat "$root/r4.out")"
+out="$("$W" acme --bogus 2>&1)"; rc=$?
+expect "an unknown option is refused" '[[ $rc -eq 2 ]]' "rc=$rc"
+export MCV_WATCH_STATE="$root/state3"
+
 unset MCV_WATCH_RAW
 rm -rf "$MCV_HOME/acme/tasks" "$MCV_WATCH_STATE"/acme
 task v w:p8
@@ -448,8 +534,8 @@ say v "done" "admin!221 opened, not merged"
 out="$(poll)"
 expect "readable: a question carries its id" \
   '[[ "$(sed -n 1p <<<"$out")" == "⧉ v · QUESTION q1 · Session or query string?" ]]' "$out"
-expect "readable: a note" '[[ "$(sed -n 2p <<<"$out")" == "⧉ v · NOTE · halfway" ]]' "$out"
-expect "readable: done" '[[ "$(sed -n 3p <<<"$out")" == "⧉ v · DONE · admin!221 opened, not merged" ]]' "$out"
+expect "readable: no note" '[[ "$out" != *halfway* ]]' "$out"
+expect "readable: done" '[[ "$(sed -n 2p <<<"$out")" == "⧉ v · DONE · admin!221 opened, not merged" ]]' "$out"
 agents "w:p8,blocked,2,acme-v"
 out="$(poll)"
 expect "readable: a dialog is WAITING" '[[ "$out" == "⧉ v · WAITING · a dialog is open in its pane" ]]' "$out"

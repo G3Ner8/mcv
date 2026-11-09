@@ -7,7 +7,11 @@
 # Usage:
 #   mcv-watch <project>            poll every MCV_WATCH_INTERVAL seconds (default 5) until killed;
 #                                  exits 1 at once if a watcher for <project> already runs
-#                                  (lock: $MCV_HOME/<project>/watch.lock)
+#                                  (lock: $MCV_HOME/<project>/watch.lock); starts afresh, for a
+#                                  coordinator that has not seen this project's events
+#   mcv-watch <project> --resume   the same, going on from where the last watcher of
+#                                  <project> stopped: nothing it printed is printed again
+#                                  (state: $MCV_HOME/<project>/watch-state)
 #   mcv-watch <project> --once     one poll, keeping state in MCV_WATCH_STATE (for tests)
 #
 # Printed, one line per event: "⧉ <id> · <EVENT>[ <qid>] · <text>". The mark
@@ -17,10 +21,10 @@
 #   ⧉ <id> · BLOCKED · <text>          the worker reports it cannot go on
 #   ⧉ <id> · DONE · <text>             the worker reports its task finished
 #   ⧉ <id> · FAILED · <text>           the worker reports its task failed
-#   ⧉ <id> · NOTE · <text>             a progress note
 #   ⧉ <id> · WAITING · ...             it stopped at an approval or question dialog in its pane
 #   ⧉ <id> · RESUMED · ...             it left that dialog and is working again
-#   ⧉ <id> · STOPPED · ...             its turn ended with no report (see below): read its screen
+#   ⧉ <id> · STOPPED · ...             its turn ended with no report (see below), or a wait
+#                                      it announced has lasted past the limit: read its screen
 #   ⧉ <id> · DELIVER <qid> · <answer>  an answer kept as pending, now that the worker
 #                                      has stopped: send it, then record it
 #   ⧉ <id> · GONE · ...                the worker's pane is no longer there (not while
@@ -28,11 +32,13 @@
 # A log kind this list does not name is printed in capitals the same way.
 # MCV_WATCH_RAW=1 prints the same events tab-separated instead, for scripts
 # and tests: "<time> <project>/<id> <kind> <qid|-> <text>", where kind is a
-# log kind, "deliver", "gone", or "state" with blocked, working or done.
+# log kind, "deliver", "gone", or "state" with blocked, working or done (a
+# stuck wait adds a fifth field, "wait").
 #
 # Not printed: changes to idle or unknown, and to working except from
-# blocked; the coordinator's own
-# "answered" and "pending" lines; anything already in a log when the watcher
+# blocked; note and waiting lines (the status table shows them); the
+# coordinator's own "answered", "amended" and "pending" lines; anything already in a
+# log when the watcher
 # starts, except questions that have no answered or pending line yet, which
 # are printed once so a coordinator started later still sees them, and
 # pending answers, which come as DELIVER once the worker has stopped.
@@ -41,6 +47,11 @@
 # that line already woke the coordinator, and when a DELIVER goes out for
 # the same stop. A turn that ends with no log line, or after only a note,
 # does print it: then the coordinator reads the screen.
+# A turn that ends right after a waiting line is the stop the worker
+# announced and prints nothing; if the worker is still stopped
+# MCV_WATCH_WAIT_LIMIT seconds later (default 1800; 0: never), STOPPED is
+# printed once. Working again ends the wait; any report other than a note
+# ends it too.
 #
 # A project with no tasks folder yet (nothing spawned, or a misspelt name)
 # is said once on stderr; the watcher keeps running.
@@ -50,8 +61,10 @@
 # skipped until it can.
 #
 # Environment: MCV_HOME (default ~/.claude/mcv), MCV_WATCH_INTERVAL,
-# MCV_WATCH_STATE (state folder; a temporary one when not set, except with
-# --once), MCV_HERDR (the herdr helper; default: mcv-herdr.sh next to this file).
+# MCV_WATCH_WAIT_LIMIT, MCV_WATCH_STATE (state folder, kept as it is even
+# without --resume; default $MCV_HOME/<project>/watch-state, required with
+# --once), MCV_WATCH_NOW (the clock in seconds, for tests), MCV_HERDR (the
+# herdr helper; default: mcv-herdr.sh next to this file).
 
 set -euo pipefail
 
@@ -68,14 +81,19 @@ usage() {
 
 project="${1:-}"
 [[ "$project" =~ ^[a-z][a-z0-9_-]*$ ]] || usage "expected a project name"
-once=""
+once="" resume=""
 case "$#:${2:-}" in
   1:) ;;
   2:--once) once=1 ;;
+  2:--resume) resume=1 ;;
   *) usage "unexpected arguments: ${*:2}" ;;
 esac
 [[ "$INTERVAL" =~ ^[0-9]+(\.[0-9]+)?$ && ! "$INTERVAL" =~ ^0+(\.0+)?$ ]] \
   || usage "MCV_WATCH_INTERVAL must be a number of seconds above 0, got '$INTERVAL'"
+WAIT_LIMIT="${MCV_WATCH_WAIT_LIMIT:-1800}"
+[[ "$WAIT_LIMIT" =~ ^[0-9]+$ ]] || usage "MCV_WATCH_WAIT_LIMIT must be a whole number of seconds, got '$WAIT_LIMIT'"
+[[ -z "${MCV_WATCH_NOW:-}" || "$MCV_WATCH_NOW" =~ ^[0-9]+$ ]] \
+  || usage "MCV_WATCH_NOW must be seconds since 1970, got '$MCV_WATCH_NOW'"
 tasks="$MCV_HOME/$project/tasks"
 
 # Print one event, given as its tab-separated raw form (see the header).
@@ -91,7 +109,13 @@ emit() {
       case "$f4" in
         blocked) label=WAITING; text="a dialog is open in its pane" ;;
         working) label=RESUMED; text="it left the dialog and is working again" ;;
-        done)    label=STOPPED; text="its turn ended with no report; read its screen" ;;
+        done)
+          label=STOPPED
+          if [[ "$f5" == wait ]]; then
+            text="it said it would wait, and is still stopped past the limit; read its screen"
+          else
+            text="its turn ended with no report; read its screen"
+          fi ;;
         *)       label="$(printf '%s' "$f4" | tr '[:lower:]' '[:upper:]')" ;;
       esac ;;
     gone)           label=GONE; text="its pane is no longer there" ;;
@@ -104,8 +128,9 @@ emit() {
 
 # One poll. The state folder has one subfolder per project, so watchers of
 # two projects can share it; per task it keeps one line:
-#   <pane> <last state> <last change counter> <log lines read> <kind of last printed log line> <gone 0|1> <owe 0|1> <delivered up to line>
-# owe is 1 when a pending line was read but the worker's state could not be
+#   <pane> <last state> <last change counter> <log lines read> <kind of last log line read> <gone 0|1> <owe 0|1> <delivered up to line> <waiting since>
+# waiting since is the time, in seconds, of the stop that followed a waiting
+# line, or 0 when the worker is not in such a wait. owe is 1 when a pending line was read but the worker's state could not be
 # checked yet (herdr down); the next poll then delivers it if the worker has
 # stopped. The pane names the task's current worker: a task removed and spawned again
 # under the same id, even within one poll, gets a new pane and a fresh start.
@@ -135,8 +160,9 @@ poll() {
 
   # One timestamp per poll; forking date per task made a poll of 200 tasks
   # slower than the interval.
-  local now
+  local now nowsec
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  nowsec="${MCV_WATCH_NOW:-$(date +%s)}"
 
   local meta
   for meta in "$tasks"/*/meta; do
@@ -151,18 +177,20 @@ poll() {
     log="$tdir/status.log"
     sf="$dir/$id"
 
-    local spane=- prev=- prev_seq=- offset=0 lastkind=- gone=0 owe=0 dl=0 new=1 damaged=0
+    local spane=- prev=- prev_seq=- offset=0 lastkind=- gone=0 owe=0 dl=0 ws=0 new=1 damaged=0
     if [[ -f "$sf" ]]; then
-      read -r spane prev prev_seq offset lastkind gone owe dl <"$sf" || true
+      read -r spane prev prev_seq offset lastkind gone owe dl ws <"$sf" || true
       [[ "$owe" =~ ^[01]$ ]] || owe=0
       [[ "$dl" =~ ^[0-9]+$ ]] || dl=0
+      # A state line written before waiting existed has no ninth field.
+      [[ "$ws" =~ ^[0-9]+$ ]] || ws=0
       if [[ ! "$offset" =~ ^[0-9]+$ || ! "$gone" =~ ^[01]$ || -z "$lastkind" ]]; then
         damaged=1
       elif [[ "$spane" == "$pane" ]]; then
         new=0
       fi
       if (( new )); then
-        prev=- prev_seq=- offset=0 lastkind=- gone=0 owe=0 dl=0
+        prev=- prev_seq=- offset=0 lastkind=- gone=0 owe=0 dl=0 ws=0
       fi
     fi
 
@@ -213,22 +241,27 @@ poll() {
       while IFS=$'\t' read -r ts kind qid text; do
         # A blank or broken line is not an event, and must not become the
         # "last kind" (an empty one would read as damaged state next poll).
-        [[ -z "$kind" || "$kind" == answered ]] && continue
+        [[ -z "$kind" || "$kind" == answered || "$kind" == amended ]] && continue
         # The coordinator's own pending answer: owed back once the worker
         # stops, never printed as it is.
         if [[ "$kind" == pending ]]; then
           owe=1
           continue
         fi
-        emit "$(printf '%s\t%s\t%s\t%s\t%s' "$ts" "$task" "$kind" "$qid" "$text")"
         lastkind="$kind"
+        # A note is for the status table and a waiting line only marks the
+        # coming stop as expected: neither is worth waking the coordinator.
+        # Any other report is, and it ends a wait.
+        [[ "$kind" == note || "$kind" == waiting ]] && continue
+        ws=0
+        emit "$(printf '%s\t%s\t%s\t%s\t%s' "$ts" "$task" "$kind" "$qid" "$text")"
       done < <(tail -n +"$((offset + 1))" "$log" | head -n "$((lines - offset))")
       offset="$lines"
     fi
 
     local row status seq
     if (( ! herdr_ok )); then
-      printf '%s %s %s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" "$owe" "$dl" >"$sf"
+      printf '%s %s %s %s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" "$owe" "$dl" "$ws" >"$sf"
       continue
     fi
     row="$(awk -F'\t' -v p="$pane" '$1 == p { print $2 " " $3; exit }' <<<"$agents")"
@@ -282,10 +315,24 @@ poll() {
           :
         elif [[ "$status" == "done" ]] && [[ "$lastkind" =~ ^(needs-decision|blocked|done|failed)$ ]]; then
           :
+        elif [[ "$status" == "done" && "$lastkind" == waiting ]]; then
+          # The stop the worker announced: count the wait from here.
+          ws="$nowsec"
         else
           emit "$(printf '%s\t%s\tstate\t%s' "$now" "$task" "$status")"
         fi
         lastkind=-
+      elif [[ "$status" == working ]]; then
+        # Woken by its background work: this wait is over. If it waits
+        # again, it says so again.
+        ws=0
+      fi
+      # A wait that lasts past the limit is a worker stuck or a job that
+      # never reports back; said once, then the wait is forgotten.
+      if (( ws > 0 && WAIT_LIMIT > 0 && nowsec - ws >= WAIT_LIMIT )) \
+          && [[ "$status" == "done" || "$status" == idle ]]; then
+        emit "$(printf '%s\t%s\tstate\tdone\twait' "$now" "$task")"
+        ws=0
       fi
       # The user answered a dialog in the worker's pane: without this line
       # the coordinator, last told it was blocked, would go on asking the
@@ -297,7 +344,7 @@ poll() {
       prev_seq="$seq"
     fi
 
-    printf '%s %s %s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" "$owe" "$dl" >"$sf"
+    printf '%s %s %s %s %s %s %s %s %s\n' "$pane" "$prev" "$prev_seq" "$offset" "$lastkind" "$gone" "$owe" "$dl" "$ws" >"$sf"
   done
 
   touch "$dir/.started"
@@ -364,15 +411,15 @@ until mkdir "$lock" 2>/dev/null; do
 done
 printf '%s\n' "$$" >"$lock/pid"
 
-state="${MCV_WATCH_STATE:-}"
-tmpstate=""
-if [[ -z "$state" ]]; then
-  state="$(mktemp -d)"
-  tmpstate="$state"
-fi
+# The state outlives the watcher, so that one restarted with --resume after
+# the Monitor tool ended it goes on from the lines it had read instead of
+# showing open questions again. A watcher started without --resume is a new
+# coordinator's: it starts from nothing, and shows what is still open.
+state="${MCV_WATCH_STATE:-$MCV_HOME/$project/watch-state}"
+[[ -n "$resume" || -n "${MCV_WATCH_STATE:-}" ]] || rm -rf "$state"
 # The Monitor tool stops the watcher with a signal, usually mid-sleep.
 trap 'exit 0' INT TERM
-trap 'rm -rf "$lock"; [[ -z "$tmpstate" ]] || rm -rf "$tmpstate"' EXIT
+trap 'rm -rf "$lock"' EXIT
 mkdir -p "$state"
 while true; do
   poll "$state"

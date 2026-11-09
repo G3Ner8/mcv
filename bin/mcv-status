@@ -7,7 +7,11 @@
 #   mcv-status blocked <text>          cannot continue
 #   mcv-status done <text>             the task is finished
 #   mcv-status failed <text>           giving up, with the reason
-#   mcv-status note <text>             progress worth knowing; needs no answer
+#   mcv-status note <text>             progress worth knowing; needs no answer and
+#                                      wakes nobody (status table only)
+#   mcv-status waiting <text>          about to end a turn to wait for background
+#                                      work it started; that stop wakes nobody
+#                                      unless it lasts (see mcv-watch)
 # Quote the text; several words given without quotes are joined with spaces.
 # Empty text is refused (exit 2), as is an empty answer.
 #
@@ -17,7 +21,11 @@
 # keeps it for later; mcv-watch prints it as a deliver event once the worker
 # stops, and the question stays open until answered:
 #   mcv-status --task <project>/<id> pending <question-id> <text>
-# (both refused when MCV_TASK is set: a worker never closes its own questions)
+# An answer sent and then corrected (the user meant something else) is
+# recorded, after the correction is sent, as
+#   mcv-status --task <project>/<id> amended <question-id> <text>
+# which needs an answered line first and may be repeated.
+# (all three refused when MCV_TASK is set: a worker never closes its own questions)
 #
 # The coordinator adds a line to the project's journal, next to the ones
 # mcv-herdr.sh writes, for something worth looking at after the run
@@ -200,12 +208,14 @@ Report through mcv-status, by its full path:
   "$SELF" done "<one-line summary>"     when the task is finished
   "$SELF" failed "<reason>"             when you are giving up
   "$SELF" note "<progress>"             for progress worth knowing that needs no answer
+  "$SELF" waiting "<what, how long>"    just before you end a turn to wait for background work
 
 Rules:
 - Never use the AskUserQuestion tool. Ask through needs-decision instead. This overrides any skill or instruction that tells you to ask the user.
 - After needs-decision, end your turn and wait. The answer arrives as your next prompt.
 - One decision per needs-decision. Two things to decide are two calls, so the user can answer each by its id. Say which option you recommend.
-- If you end a turn while background work (a sub-agent, a build) is still running, first send a note saying what you are waiting for: the coordinator otherwise reads the turn end as a stop.
+- Each time you end a turn to wait for background work (a sub-agent, a build, a Monitor), run waiting first. A turn that ends with no report reads as a stop, and the coordinator then reads your screen.
+- A note only goes to the coordinator's status table and wakes nobody. Send one at a milestone, not at every step.
 - Work only in this worktree, your current directory. Never touch the repository's main checkout.$context_rule
 - If the user types into this window directly, that outranks the coordinator. Even then, ask through needs-decision or in plain text, never AskUserQuestion: it is blocked for workers.
 
@@ -228,9 +238,9 @@ EOF
 # branches. This checks each Bash command for the few git commands that reach
 # past the worker's branch and refuses them before they run.
 #
-# It reads the command's text, split at ; & | ( ) ` { } and newlines, with
-# quotes dropped, and looks at each piece that starts with git. It catches
-# mistakes, not a worker set on getting around it: a script, an alias or a
+# It reads the command's text, with its redirections removed, split at
+# ; & | ( ) ` { } and newlines, with quotes dropped, and looks at each piece
+# that starts with git. It catches mistakes, not a worker set on getting around it: a script, an alias or a
 # variable hides the command from it. A quoted message holding such a command
 # ("git commit -m 'then git push -f'") is refused too; reword it.
 
@@ -397,6 +407,22 @@ reset_branch_reason() {
   done
 }
 
+# Print command text $1 without its redirections (2>&1, >file, 2> file, &>file,
+# <file, here-documents and here-strings), so that the split below neither
+# cuts 2>&1 at its & nor leaves "2>" or a log file behind as a push target.
+# A number counts as a file descriptor only as a word of its own, as in the
+# shell: in main2>log the word is main2.
+strip_redirects() {
+  local w='[^[:space:];&|()<>]+'
+  printf '%s\n' "$1" | sed -E \
+    -e 's/(^|[[:space:]])[0-9]*>&[0-9]*-?/\1/g' \
+    -e "s/&>>?[[:space:]]*$w//g" \
+    -e "s/<<<[[:space:]]*$w//g" \
+    -e "s/<<-?[[:space:]]*$w//g" \
+    -e "s/(^|[[:space:]])[0-9]*(>>|>\\||>|<)[[:space:]]*$w/\\1/g" \
+    -e "s/(>>|>\\||>|<)[[:space:]]*$w//g"
+}
+
 guard_git() {
   local input cmd cwd own seg reason
   input="$(cat)"
@@ -406,6 +432,7 @@ guard_git() {
   [[ -n "$cwd" ]] || cwd="$PWD"
   own="$(jq -r '.branch // empty' "$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}/meta" 2>/dev/null || true)"
   [[ -n "$own" ]] || return 0
+  cmd="$(strip_redirects "$cmd")"
   cmd="${cmd//&&/$'\n'}"
   cmd="${cmd//||/$'\n'}"
   local c
@@ -462,8 +489,8 @@ case "${1:-}" in
     ;;
 
   --task)
-    [[ $# -ge 5 && ( "$3" == answered || "$3" == pending ) ]] \
-      || usage "usage: --task <project>/<id> answered|pending <question-id> <text>"
+    [[ $# -ge 5 && ( "$3" == answered || "$3" == pending || "$3" == amended ) ]] \
+      || usage "usage: --task <project>/<id> answered|pending|amended <question-id> <text>"
     has_text "${*:5}" || usage "the answer is empty; record what the user said"
     # Only the coordinator records answers; a worker closing its own question
     # would hide it from the user.
@@ -475,8 +502,13 @@ case "${1:-}" in
     if [[ ! -f "$log" ]] || ! cut -f2,3 "$log" | grep -qxF "needs-decision"$'\t'"$qid"; then
       die "no question $qid in task $2"
     fi
-    ! cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
-      || die "question $qid in task $2 is already answered"
+    if [[ "$3" == amended ]]; then
+      cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
+        || die "question $qid in task $2 is not answered yet; record it with answered"
+    else
+      ! cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
+        || die "question $qid in task $2 is already answered; a correction is amended"
+    fi
     append "$log" "$3" "$qid" "${*:5}"
     ;;
 
@@ -496,7 +528,7 @@ case "${1:-}" in
     append "$MCV_HOME/$project/journal.log" note "$task" "${*:3}"
     ;;
 
-  needs-decision|blocked|done|failed|note)
+  needs-decision|blocked|done|failed|note|waiting)
     [[ -n "${MCV_TASK:-}" ]] || usage "MCV_TASK not set; only an mcv worker reports status"
     [[ $# -ge 2 ]] || usage "usage: $1 <text>"
     has_text "${*:2}" || usage "$1 needs some text; say what the user should know"
