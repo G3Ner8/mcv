@@ -302,5 +302,38 @@ expect "amending an unanswered question exits 1, pointing to answered" \
 MCV_TASK=shop/t3 "$S" --task shop/t3 amended q1 "self" >/dev/null 2>&1; rc=$?
 expect "a worker cannot amend" '[[ $rc -eq 1 ]]' "rc=$rc"
 
+# An order that answers no question, given while the worker is busy, is kept
+# as pending under an order id the script picks (measured on carsol: "push
+# item 1" was refused four times and held only in the coordinator's memory).
+out="$(env -u MCV_TASK "$S" --task shop/t3 pending - "push item 1")"; rc=$?
+expect "pending - queues an order and prints its id o1" '[[ $rc -eq 0 && "$out" == o1 ]]' "rc=$rc $out"
+expect "the order is a pending line under o1" \
+  '[[ "$(tail -1 "$log3" | cut -f2-4)" == "pending"$'"'"'\t'"'"'"o1"$'"'"'\t'"'"'"push item 1" ]]' "$(tail -1 "$log3")"
+out="$(env -u MCV_TASK "$S" --task shop/t3 pending - "then open the MR")"
+expect "a second order gets o2" '[[ "$out" == o2 ]]' "$out"
+env -u MCV_TASK "$S" --task shop/t3 pending o1 "push item 1" >/dev/null; rc=$?
+expect "an order refused as busy can be queued again under its id" '[[ $rc -eq 0 ]]' "rc=$rc"
+out="$(env -u MCV_TASK "$S" --task shop/t3 pending - "third")"
+expect "queuing again does not reuse an id" '[[ "$out" == o3 ]]' "$out"
+env -u MCV_TASK "$S" --task shop/t3 answered o1 "push item 1"; rc=$?
+expect "a sent order is recorded with answered" '[[ $rc -eq 0 ]]' "rc=$rc"
+env -u MCV_TASK "$S" --task shop/t3 answered o1 "again" >/dev/null 2>&1; rc=$?
+expect "an order is recorded as sent once" '[[ $rc -eq 1 ]]' "rc=$rc"
+out="$(env -u MCV_TASK "$S" --task shop/t3 answered o9 "never queued" 2>&1)"; rc=$?
+expect "an order that was never queued exits 1, naming it" '[[ $rc -eq 1 && "$out" == *"no order o9"* ]]' "rc=$rc $out"
+env -u MCV_TASK "$S" --task shop/t3 pending o9 "x" >/dev/null 2>&1; rc=$?
+expect "pending under an order id never given exits 1" '[[ $rc -eq 1 ]]' "rc=$rc"
+env -u MCV_TASK "$S" --task shop/t3 answered - "x" >/dev/null 2>&1; rc=$?
+expect "- is only for pending" '[[ $rc -eq 2 || $rc -eq 1 ]]' "rc=$rc"
+MCV_TASK=shop/t3 "$S" --task shop/t3 pending - "self" >/dev/null 2>&1; rc=$?
+expect "a worker cannot queue an order" '[[ $rc -eq 1 ]]' "rc=$rc"
+env -u MCV_TASK "$S" --task shop/t3 pending - "   " >/dev/null 2>&1; rc=$?
+expect "an empty order is refused" '[[ $rc -eq 2 ]]' "rc=$rc"
+# A worker that has not written a line yet has no status.log.
+mkdir -p "$home/shop/tasks/t4"
+echo '{}' >"$home/shop/tasks/t4/meta"
+out="$(env -u MCV_TASK "$S" --task shop/t4 pending - "start with the cart" 2>&1)"; rc=$?
+expect "an order for a worker with no log yet is o1" '[[ $rc -eq 0 && "$out" == o1 ]]' "rc=$rc $out"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

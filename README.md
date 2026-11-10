@@ -118,7 +118,8 @@ Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
 Questions have numbers and options have letters, so a reply cannot mix them up. If the
 conversation has moved on from a card before you answer it, the coordinator says back what it
 will send and waits for your yes. A worker's progress notes, and the waits it announces while a
-build or a sub-agent runs, do not interrupt you; ask where things stand to see them.
+build or a sub-agent runs, do not interrupt you; ask where things stand to see them. Something
+you tell a worker while it is busy ("push it") is queued and goes in when it next stops.
 
 If your terminal font has no `⧉` and shows a box instead, mcv still works; the mark is only
 there to catch the eye.
@@ -151,7 +152,8 @@ Run `H` with no arguments for every command and option. By hand you also see wha
 would: `mcv-watch <project>` (next to `H`) prints each question and stop as it happens
 (`--resume` goes on where the last one stopped, without showing anything twice), and
 `mcv-status --task <project>/<id> answered q<n> "<answer>"` records an answer you sent with
-`prompt` (`amended` records a correction sent after it). Run either with no arguments for its
+`prompt` (`amended` records a correction sent after it; `pending - "<order>"` queues an order
+for a busy worker). Run either with no arguments for its
 usage.
 
 - `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
@@ -194,7 +196,8 @@ usage.
   name can be used again. It also works after you have closed the worker's herdr workspace
   yourself. Before deleting the task's state it copies the task's record to
   `~/.claude/mcv/<project>/history/` (see "What mcv writes").
-- herdr shows each worker's workspace, labelled `mcv <project>/<id>`, under a workspace for its
+- herdr shows each worker's workspace, labelled `⧉ <id> · <project>` (task first, since the
+  sidebar cuts long labels), under a workspace for its
   repository's main checkout, and opens that one if you do not have it open. After the last
   worker of a repository, `remove` closes the one herdr opened for it, unless you have started
   using it; one you opened yourself is never closed. **Closing a repository's workspace in herdr

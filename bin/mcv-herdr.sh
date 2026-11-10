@@ -25,7 +25,7 @@
 #       refused. The new branch has no upstream until the worker pushes it. One
 #       spawn runs at a time per repository; a second one waits for the
 #       first. herdr chooses the folder, under ~/.herdr/worktrees/, and labels
-#       its workspace "mcv <project>/<id>". Then start
+#       its workspace "⧉ <id> · <project>". Then start
 #       an idle Claude in it with MCV_TASK=<project>/<id> set. Send it work with `prompt`. Arguments after
 #       `--` go to claude, e.g. -- --permission-mode default; mcv's own
 #       --base and --context there are refused, and so are Claude's
@@ -683,8 +683,11 @@ cmd_spawn() {
     && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
 
   # From here on, a branch named $branch was made by this spawn. The label
-  # marks the workspace as mcv's in herdr's sidebar, beside the user's own.
-  local label="mcv $project/$id"
+  # marks the workspace as mcv's in herdr's sidebar, beside the user's own,
+  # with the mark the coordinator's events start with. The task id comes
+  # first because the sidebar cuts long labels; herdr already shows the
+  # workspace under its repository.
+  local label="⧉ $id · $project"
   NEW_BRANCH="$branch"
   NEW_LABEL="$label"
   local created ws pane wt linked before opened
@@ -703,7 +706,7 @@ cmd_spawn() {
   wt="$(jfield "$created" .result.worktree.path)"
   linked="$(jfield "$created" .result.workspace.worktree.is_linked_worktree)"
   [[ -n "$ws" ]] \
-    || die "herdr worktree create gave no workspace id; look in herdr for a workspace labelled $name and close it"
+    || die "herdr worktree create gave no workspace id; look in herdr for a workspace labelled '$label' and close it"
   NEW_WS="$ws"
   [[ -n "$pane" && -n "$wt" && -d "$wt" ]] \
     || abandon_worktree "$ws" "herdr worktree create gave unexpected output"

@@ -45,7 +45,7 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    2. Refuse an existing branch, locally or on a remote, ignoring case, and `main`/`master`/`develop`.
    3. Lock the repository (`$MCV_HOME/.locks/<repo key>`), fetch, resolve the base (`--base`, else
       the default branch of `origin` or of the only remote, else HEAD when there is no remote).
-   4. `herdr worktree create`, labelled `mcv <project>/<id>`; if herdr opened a workspace for the
+   4. `herdr worktree create`, labelled `⧉ <id> · <project>`; if herdr opened a workspace for the
       repository's main checkout with it (none was open before), record its id in
       `.repo-workspaces/<repo key>`. Write meta at once, with the base commit and a `starting`
       marker.
@@ -72,6 +72,8 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    `<id> #<n>`, reads the worker's screen, sends the answer with `prompt --no-wait`, and records it
    with `mcv-status --task ... answered`. If the worker is still busy, the coordinator records the
    answer as `pending` instead, and the watcher prints it back as `DELIVER` when the worker stops.
+   An order that answers no question takes the same path: `pending - <text>` queues it under a
+   new order id (`o1`, ...), picked under the log's lock.
 5. **Remove** (`mcv-herdr.sh remove`), when the user agrees: refuse a dirty worktree, remove it
    through herdr (or git, if the workspace is already gone), copy the task's `meta`, `status.log`
    and `transcripts` to `<project>/history/<id>-<UTC time>/` (if that fails, the task state
@@ -119,8 +121,9 @@ files from `.worktreeinclude`), `created` (UTC).
 **status.log** line: `<UTC time>\t<kind>\t<question id or ->\t<text>`, with kind one of
 `needs-decision`, `blocked`, `done`, `failed`, `note`, `waiting` (the worker's), `pending`,
 `answered`, `amended` (the coordinator's). Text has tabs, newlines and other control characters
-removed. Question ids are `q1`, `q2`, ... per task. A question is open until it has an `answered`
-line; a `pending` line holds an answer the coordinator could not send yet; an `amended` line, only
+removed. Question ids are `q1`, `q2`, ... per task, and order ids `o1`, `o2`, ... A question is
+open until it has an `answered` line; a `pending` line holds an answer, or an order, the
+coordinator could not send yet (an order's `answered` line records that it was sent); an `amended` line, only
 after `answered`, holds a correction sent later, so the log says what the worker was last told.
 
 **Locks** are folders created with `mkdir` (atomic) holding `<pid> <epoch seconds>`. A lock whose
@@ -144,7 +147,9 @@ was down, delivered is the log line up to which pending answers were already del
 pending line is delivered once, and waiting since is the time of the stop a `waiting` line
 announced (0 when none). The state outlives the watcher: the Monitor tool ends it after 30
 minutes, and `mcv-watch <project> --resume` goes on from it; started without `--resume`, the
-watcher clears it and starts afresh.
+watcher clears it and starts afresh. The coordinator resumes at once while a worker is busy, and
+otherwise just before its next `spawn` or `prompt` (measured on herdr 0.9.5: it did so, and the
+only event was the new `DONE`), so an idle project costs no wake-ups.
 The pane identifies the worker: a task removed and spawned again gets a new pane and a fresh start.
 
 ## Watcher events
@@ -162,7 +167,7 @@ tests read them; the raw kind is in brackets:
 ⧉ <id> · RESUMED · ...             (state working) it left that dialog: answered in its pane
 ⧉ <id> · STOPPED · ...             (state done) a turn ended with no report line since the last event,
                                    or (state done, wait) a wait it announced outlasted the limit
-⧉ <id> · DELIVER <qid> · <answer>  (deliver) a pending answer, now that the worker has stopped
+⧉ <id> · DELIVER <qid> · <answer>  (deliver) a pending answer or order, now that the worker has stopped
 ⧉ <id> · GONE · ...                (gone) the worker no longer runs Claude
 ```
 
@@ -217,7 +222,8 @@ worker.
 - A worker's git command that pushes to another branch, force-pushes, or deletes or moves another
   branch or a tag is refused before it runs, as far as its text shows it (Git guard).
 - No work is sent to a worker that did not get its rules: `prompt` needs `rules-loaded`.
-- An answer the user gave is never lost to a busy worker: it waits as `pending` until delivered.
+- An answer or order the user gave is never lost to a busy worker: it waits as `pending` until
+  delivered.
 - A worker is refused when it records an answer (`mcv-status --task` with `MCV_TASK` set), and its
   rules forbid it; see Known limits for what that does not stop.
 - Errors are one line; no command leaves a half-made task that `remove` cannot clean up, except
