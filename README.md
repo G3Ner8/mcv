@@ -101,6 +101,10 @@ the config does not start a worker. Questions arrive labelled by task, for examp
 `cart-fix #1`; answer in plain words. The coordinator never answers a worker's question or
 approves a worker's dialog for you.
 
+Each session opens with one line naming the version it runs, for example
+`⧉ mcv 0.2.4 · brewly · herdr 0.9.5 · 0 workers`. A session keeps the version it started with:
+after `/plugin marketplace update mcv`, start a new session to use the new one.
+
 Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
 
 ```
@@ -139,7 +143,7 @@ plugin Claude Code runs. Call it by its full path, either by asking Claude to ru
 after `!` in Claude Code. Below, `H` stands for that path.
 
 ```
-H doctor                                     # herdr, its server, the integration, jq
+H doctor                                     # herdr, its server, the integration, jq; prints mcv's version
 H spawn brewly cart-fix ~/code/brewly/web fix/cart-total
                                              # new worktree on new branch fix/cart-total, idle Claude in it
 H prompt brewly/cart-fix "The cart total ignores the oat-milk surcharge; fix it"
@@ -197,7 +201,8 @@ usage.
   yourself. Before deleting the task's state it copies the task's record to
   `~/.claude/mcv/<project>/history/` (see "What mcv writes").
 - herdr shows each worker's workspace, labelled `⧉ <id> · <project>` (task first, since the
-  sidebar cuts long labels), under a workspace for its
+  sidebar cuts long labels, after about 12 characters on herdr 0.9.5, so the coordinator keeps
+  ids that short when it can), under a workspace for its
   repository's main checkout, and opens that one if you do not have it open. After the last
   worker of a repository, `remove` closes the one herdr opened for it, unless you have started
   using it; one you opened yourself is never closed. **Closing a repository's workspace in herdr

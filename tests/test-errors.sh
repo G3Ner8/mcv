@@ -100,6 +100,16 @@ expect "doctor with garbage from herdr status: one line" 'one_line' "rc=$rc $out
 st() { printf '{"client":{"version":"%s"},"server":{"status":"running","version":"%s","endpoint_compatible":true}}' "$1" "$2"; }
 out="$("$H" doctor 2>&1)"; rc=$?
 expect "doctor passes on a healthy herdr" '[[ $rc -eq 0 && "$(jq -r .ok <<<"$out")" == true ]]' "rc=$rc $out"
+# The version of the copy that runs, so a session still on an older install
+# shows it (measured: a session kept 0.2.0's helpers after 0.2.2 was installed).
+want="$(jq -r .version "$BIN/../.claude-plugin/plugin.json")"
+expect "doctor names the mcv version of its own copy" '[[ "$(jq -r .mcv <<<"$out")" == "$want" ]]' "want=$want $out"
+expect "doctor names the herdr version" '[[ "$(jq -r .herdr <<<"$out")" =~ ^[0-9] ]]' "$out"
+mkdir -p "$root/loose"
+cp "$H" "$root/loose/mcv-herdr.sh"
+out="$("$root/loose/mcv-herdr.sh" doctor 2>&1)"; rc=$?
+expect "a copy with no plugin.json beside it still passes, version unknown" \
+  '[[ $rc -eq 0 && "$(jq -r .mcv <<<"$out")" == unknown ]]' "rc=$rc $out"
 out="$(FAKE_STATUS="$(st 0.10.0-beta 0.10.0-beta)" "$H" doctor 2>&1)"; rc=$?
 expect "doctor accepts a version with a suffix" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 out="$(FAKE_STATUS="$(st 0.9.4 0.9.4)" "$H" doctor 2>&1)"; rc=$?

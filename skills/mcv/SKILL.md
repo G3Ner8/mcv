@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.3"
+  version: "0.2.4"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -35,7 +35,9 @@ Skip this skill for:
    The helpers are in `<path>/../../bin/`; call that folder `BIN` below and always use full paths.
    Never rely on `PATH` or `CLAUDE_PLUGIN_ROOT`.
 2. **herdr is ready.** Run `BIN/mcv-herdr.sh doctor`. On failure it prints one line naming the
-   problem and the fix; tell the user that line in plain words and stop.
+   problem and the fix; tell the user that line in plain words and stop. On success it prints
+   `mcv` (the version of the helpers this session runs) and `herdr`; keep both for the opening
+   line below.
 3. **The project config exists.** Read `.claude/mcv.json` in the project's root folder (where this
    session started). If it is missing, build it with the user (below) and continue only after they
    confirm it. Schema:
@@ -124,6 +126,17 @@ Skip this skill for:
    using it; if not, another session is watching this project, so tell the user, with the pid the
    message gives, and let them choose to stop it (`kill <pid>`) or work from that session.
 
+Once the pre-conditions hold, open with one line, the first time in this session only, using the
+versions `doctor` printed and the number of tasks under `$MCV_HOME/<project>/tasks/`:
+
+```
+⧉ mcv <mcv> · <project> · herdr <herdr> · <n> workers
+```
+
+For example `⧉ mcv 0.2.4 · shop · herdr 0.9.5 · 0 workers`. Never write a version from memory or
+from this file; if `mcv` is `unknown`, show it as it is. The status table's header carries the
+same version.
+
 ## Apply
 
 ### Dispatching work
@@ -138,7 +151,8 @@ there, in one line, but the user chooses.
    best guess first.
 2. **Name the task.** Pick a short id from the work itself (`cart-fix`, `loyalty-csv`): lowercase,
    digits and `-`, unique in this project, and short enough that `<project>-<id>` is at most 32
-   characters. Pick a new branch name following the project's own convention if its CLAUDE.md or
+   characters. Keep it to 12 characters when you can: herdr's sidebar shows about that much of a
+   worker's label (measured on herdr 0.9.5: `admin-lot1-check` showed as `admin-lot1-c…`). Pick a new branch name following the project's own convention if its CLAUDE.md or
    CONTRIBUTING has one, else `fix/<what>` for a fix and `feat/<what>` for anything else
    (`fix/cart-total`, `feat/loyalty-csv`).
 3. **Write the task so the worker can do it without you.** The worker sees its own repo, plus the
@@ -289,7 +303,7 @@ cart-fix's screen`. Never leave the description to show the helper's full path.
 **Where things stand.** One header line, then a table:
 
 ```
-⧉ mcv · shop · 2 workers
+⧉ mcv 0.2.4 · shop · 2 workers
 
   worker       repo  branch              state      since  you
   cart-fix     web   fix/cart-total      QUESTION   3m     answer #1
