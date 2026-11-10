@@ -64,7 +64,7 @@ expect "the id can be spawned again (the dead spawn's claim is taken over)" '[[ 
 # removes the worktree, the branch and the task.
 FAKE_SLEEP=2 "$H" spawn acme k2 "$repo" feat/k2 >/dev/null 2>&1 &
 pid=$!
-wait_for 'grep -q "begin mcv acme/k2" "$FAKE_DIR/order" 2>/dev/null'
+wait_for 'grep -q "begin ⧉ k2 · acme" "$FAKE_DIR/order" 2>/dev/null'
 kill -TERM "$pid"
 wait "$pid"; rc=$?
 expect "TERM during worktree create: exit 143" '[[ $rc -eq 143 ]]' "rc=$rc"

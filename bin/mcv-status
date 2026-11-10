@@ -21,6 +21,11 @@
 # keeps it for later; mcv-watch prints it as a deliver event once the worker
 # stops, and the question stays open until answered:
 #   mcv-status --task <project>/<id> pending <question-id> <text>
+# An order that answers no question, given while the worker is busy, is kept
+# the same way under a new order id, which is printed (o1, o2, ...):
+#   mcv-status --task <project>/<id> pending - <text>
+# An order id then works where a question id does: pending o<n> again after a
+# refused send, answered o<n> once it is sent.
 # An answer sent and then corrected (the user meant something else) is
 # recorded, after the correction is sent, as
 #   mcv-status --task <project>/<id> amended <question-id> <text>
@@ -490,16 +495,32 @@ case "${1:-}" in
 
   --task)
     [[ $# -ge 5 && ( "$3" == answered || "$3" == pending || "$3" == amended ) ]] \
-      || usage "usage: --task <project>/<id> answered|pending|amended <question-id> <text>"
+      || usage "usage: --task <project>/<id> answered|pending|amended <question-id|order-id> <text>, or pending - <text>"
     has_text "${*:5}" || usage "the answer is empty; record what the user said"
     # Only the coordinator records answers; a worker closing its own question
     # would hide it from the user.
     [[ -z "${MCV_TASK:-}" ]] || die "a worker cannot record answers; only the coordinator does"
     log="$(log_of "$2")" || exit 1
     qid="$4"
-    [[ "$qid" =~ ^q[1-9][0-9]*$ ]] || die "question id '$qid': expected q1, q2, ..."
+    # An order that answers no question is kept as pending under an order id
+    # (o1, o2, ...) that is picked here, under the lock, so two never share one.
+    if [[ "$3" == pending && "$qid" == - ]]; then
+      lock_log "$log"
+      n=""
+      [[ ! -f "$log" ]] || n="$(cut -f3 "$log" | sed -n 's/^o\([1-9][0-9]*\)$/\1/p' | sort -n | tail -1)"
+      qid="o$(( ${n:-0} + 1 ))"
+      append "$log" pending "$qid" "${*:5}"
+      printf '%s\n' "$qid"
+      exit 0
+    fi
+    [[ "$qid" =~ ^[qo][1-9][0-9]*$ ]] \
+      || die "id '$qid': expected a question (q1, q2, ...) or an order (o1, o2, ...); pending - queues a new order"
     lock_log "$log"
-    if [[ ! -f "$log" ]] || ! cut -f2,3 "$log" | grep -qxF "needs-decision"$'\t'"$qid"; then
+    if [[ "$qid" == o* ]]; then
+      if [[ ! -f "$log" ]] || ! cut -f2,3 "$log" | grep -qxF "pending"$'\t'"$qid"; then
+        die "no order $qid in task $2; queue one with pending -"
+      fi
+    elif [[ ! -f "$log" ]] || ! cut -f2,3 "$log" | grep -qxF "needs-decision"$'\t'"$qid"; then
       die "no question $qid in task $2"
     fi
     if [[ "$3" == amended ]]; then

@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.2"
+  version: "0.2.3"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -112,9 +112,11 @@ Skip this skill for:
    herdr pane.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
    tool: `BIN/mcv-watch <project>`, with the description `⧉ mcv · <project>` exactly (it is shown
-   after every event). The Monitor tool ends it after 30 minutes (its limit, measured); while
-   workers are still active, start it again with `BIN/mcv-watch <project> --resume`, which goes on
-   from where the last one stopped and shows nothing twice. Restart it without a word to the user
+   after every event). The Monitor tool ends it after 30 minutes (its limit, measured). Start it
+   again with `BIN/mcv-watch <project> --resume`, which goes on from where the last one stopped and
+   shows nothing twice, at once if any worker is still working, waiting or has a question open; if
+   every worker has reported `DONE` or `FAILED`, wait and start it just before your next `spawn`
+   or `prompt`. Restart it without a word to the user
    and without a journal line; say something only if it will not start. Use plain
    `BIN/mcv-watch <project>` only for the first watcher of this session. Never start a second one
    for the same project. If it exits at
@@ -217,7 +219,7 @@ with that id, say): read it there before relaying, and never relay a cut text.
 | `STOPPED` | The worker's turn ended without a report, or a wait it announced (`waiting` in its log) has lasted past the watcher's limit. This is not "finished". `read` its screen. If it is still waiting on something that is running, say nothing, or one line if the user is waiting on it; if what it waits on has died or hangs, tell the user. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. |
 | `DONE · <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
 | `FAILED · <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
-| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 5 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `DELIVER` comes once per pending line. |
+| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 5 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `DELIVER` comes once per pending line. `DELIVER oN · <order>` is an order the user gave while the worker was busy ("Sending an order" below): `read` its screen, send it with `prompt --no-wait` unless what it asked for is already done (then tell the user), and record `answered oN "<order>"`; if refused as busy, `pending oN` again. |
 | `GONE` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
 
 If `prompt` says a worker is not running Claude any more, handle it like `GONE`: `read` its screen
@@ -294,6 +296,9 @@ cart-fix's screen`. Never leave the description to show the helper's full path.
   loyalty-csv  api   feat/loyalty-csv    working    12m    —
 ```
 
+In herdr's sidebar a worker sits under its repo's workspace, labelled `⧉ <id> · <project>`. If
+the user cannot find one, name that repo.
+
 ### Sending an answer
 
 1. Match the user's reply to a label. If it could fit more than one question, or does not clearly
@@ -317,6 +322,14 @@ cart-fix's screen`. Never leave the description to show the helper's full path.
    watcher prints `deliver q<n> <answer>` as soon as the worker stops (at once if it already
    has); then send it and record `answered`. Tell the user the answer goes in when the worker
    stops.
+
+### Sending an order
+
+Work for a worker that answers no question ("push it", "also fix the footer"): `read` it, then
+send it with `prompt --no-wait`. If `prompt` refuses because the worker is busy, do not retry and
+do not keep it in mind: queue it with `BIN/mcv-status --task <project>/<id> pending - "<order>"`,
+which prints its order id (`o1`), and tell the user in one line that it goes in when the worker
+stops. It comes back as `DELIVER o1`.
 
 ### When the user asks where things stand
 

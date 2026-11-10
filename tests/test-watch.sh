@@ -326,6 +326,25 @@ expect "herdr down: no deliver yet" '[[ "$out" != *deliver* ]]' "$out"
 out="$(bpoll)"
 expect "herdr back: the pending answer is delivered" '[[ "$out" == *"brew/l${TAB}deliver${TAB}q1${TAB}medium" ]]' "$out"
 
+# An order queued while the worker works (pending -) comes back the same way
+# when it stops, each order once, in the order given.
+btask m b:p4
+agents "b:p1,done,5,brew-j|b:p2,done,2,brew-k|b:p3,idle,2,brew-l|b:p4,working,1,brew-m"
+bpoll >/dev/null
+bpend m - "push item 1"
+bpend m - "then open the MR"
+out="$(bpoll)"
+expect "orders queued while the worker works: no event yet" '[[ -z "$out" ]]' "$out"
+agents "b:p1,done,5,brew-j|b:p2,done,2,brew-k|b:p3,idle,2,brew-l|b:p4,done,2,brew-m"
+out="$(bpoll)"
+expect "worker stops: each order is delivered once, in order, with no STOPPED" \
+  '[[ "$out" == *"brew/m${TAB}deliver${TAB}o1${TAB}push item 1"*"brew/m${TAB}deliver${TAB}o2${TAB}then open the MR" && $(count "$out") -eq 2 ]]' "$out"
+bans m o1 "push item 1"; bans m o2 "then open the MR"
+out="$(bpoll)"
+expect "sent orders are not delivered again" '[[ -z "$out" ]]' "$out"
+agents "b:p1,done,5,brew-j|b:p2,done,2,brew-k|b:p3,idle,2,brew-l"
+rm -rf "$MCV_HOME/brew/tasks/m"
+
 # A watcher started later shows a pending answer as deliver, not the question
 # again, so the user is not asked twice.
 export MCV_WATCH_STATE="$root/state4"

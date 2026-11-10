@@ -4,6 +4,26 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-11-10
+
+Leftovers from issue #10, and one finding from checking 0.2.2 on herdr.
+
+### Fixed
+
+- An order given while a worker was busy ("push item 1") could only be held in the
+  coordinator's memory and retried at each stop (refused four times on carsol).
+  `mcv-status --task <t> pending - <text>` queues it under a new order id (`o1`, ...), and the
+  watcher hands it back as `DELIVER o1` when the worker stops, like a pending answer.
+- A worker's workspace label (`mcv carsol/adm...`) was cut in herdr's sidebar before the task
+  name. It is now `⧉ <id> · <project>`: the mark the coordinator's events use, then the task.
+  The status table's repo column names the workspace a worker sits under. herdr 0.9.5 offers no
+  way to place a workspace elsewhere. When herdr's answer to `worktree create` cannot be read,
+  the error now names that label; it named the agent (`acme-t3`), which no workspace shows.
+- The coordinator's rule for restarting the watcher said "while workers are still active",
+  which left a worker that had reported `DONE` undefined. It now restarts at once while a worker
+  is busy, waiting or has a question open, and otherwise just before its next `spawn` or
+  `prompt` (as a coordinator did on its own when 0.2.2 was checked on herdr).
+
 ## [0.2.2] - 2026-11-09
 
 Fixes from the second real run (three workers, two repositories, issue #10).

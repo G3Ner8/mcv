@@ -25,8 +25,9 @@
 #   ⧉ <id> · RESUMED · ...             it left that dialog and is working again
 #   ⧉ <id> · STOPPED · ...             its turn ended with no report (see below), or a wait
 #                                      it announced has lasted past the limit: read its screen
-#   ⧉ <id> · DELIVER <qid> · <answer>  an answer kept as pending, now that the worker
-#                                      has stopped: send it, then record it
+#   ⧉ <id> · DELIVER <qid> · <answer>  an answer or an order (o1, o2, ...) kept as
+#                                      pending, now that the worker has stopped:
+#                                      send it, then record it
 #   ⧉ <id> · GONE · ...                the worker's pane is no longer there (not while
 #                                      spawn is still starting it)
 # A log kind this list does not name is printed in capitals the same way.
