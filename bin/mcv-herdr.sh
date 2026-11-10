@@ -13,6 +13,8 @@
 # Commands:
 #   doctor
 #       Check that herdr, its server, its Claude integration and jq are ready.
+#       Prints {ok, mcv, herdr, server, integration}; mcv is this copy's version
+#       (from ../.claude-plugin/plugin.json, "unknown" when there is none).
 #   spawn <project> <id> <repo-path> <new-branch> [--base <ref>] [--context <folder>] [-- <claude-args>...]
 #       Fetch, then create a git worktree of <repo-path> on a branch that must
 #       not exist yet, locally, on a remote or as a tag, in any letter case
@@ -521,8 +523,12 @@ cmd_doctor() {
   [[ "$integ" =~ ^claude:\ current([[:space:]]|$) ]] \
     || die "herdr's Claude integration is not current (${integ:-missing}); run: herdr integration install claude"
 
-  jq -cn --arg c "$client" --arg s "$server_version" \
-    '{ok: true, herdr: $c, server: $s, integration: "current"}'
+  # The version of this copy, read beside it, so the coordinator can show
+  # which install it runs; a session keeps the helpers it started with.
+  local mcv
+  mcv="$(jq -r '.version // empty' "$(dirname "${BASH_SOURCE[0]}")/../.claude-plugin/plugin.json" 2>/dev/null || true)"
+  jq -cn --arg m "${mcv:-unknown}" --arg c "$client" --arg s "$server_version" \
+    '{ok: true, mcv: $m, herdr: $c, server: $s, integration: "current"}'
 }
 
 cmd_spawn() {

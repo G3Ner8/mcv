@@ -4,6 +4,23 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] - 2026-11-10
+
+From checking 0.2.3 on herdr.
+
+### Added
+
+- The coordinator opens each session with the mcv version it runs, for example
+  `⧉ mcv 0.2.4 · shop · herdr 0.9.5 · 0 workers`, and the status table's header carries it.
+  `mcv-herdr.sh doctor` prints it (`mcv`), read from the plugin.json beside its own copy, so a
+  session still running an older install shows that one; "unknown" when there is none.
+
+### Changed
+
+- The coordinator keeps task ids to 12 characters when it can: herdr 0.9.5's sidebar showed
+  `⧉ admin-lot1-check · ...` as `admin-lot1-c…`. The 32-character limit on `<project>-<id>`
+  is unchanged.
+
 ## [0.2.3] - 2026-11-10
 
 Leftovers from issue #10, and one finding from checking 0.2.2 on herdr.
