@@ -4,7 +4,8 @@
 # work herdr does, for real, so git behaves as it does under herdr:
 #   worktree create --cwd <repo> --branch <b> [--base <ref>] --label <l> --no-focus
 #       runs `git worktree add -b`, which makes a remote-tracking base the
-#       branch's upstream, as herdr's worktree create does.
+#       branch's upstream, as herdr's worktree create does; a local branch
+#       that already exists is checked out as it is, also as herdr does.
 #   worktree remove --workspace <ws>
 #   agent start <name> ...   adds <name> to FAKE_DIR/agents and runs mcv's
 #                            SessionStart hook with the env from --settings,
@@ -82,7 +83,13 @@ case "${1:-} ${2:-}" in
     fi
     id="$(wsid "$label")"
     wt="$D/wt/${id#ws-}"
-    git -C "$cwd" worktree add -q -b "$branch" "$wt" "$base" >/dev/null 2>&1
+    # herdr 0.9.5 checks out a local branch that already exists as it is
+    # (measured with no --base, the only way spawn asks for one).
+    if git -C "$cwd" show-ref --verify --quiet "refs/heads/$branch"; then
+      git -C "$cwd" worktree add -q "$wt" "$branch" >/dev/null 2>&1
+    else
+      git -C "$cwd" worktree add -q -b "$branch" "$wt" "$base" >/dev/null 2>&1
+    fi
     printf '%s\t%s\t%s\n' "$cwd" "$wt" "$label" >"$D/ws/$id"
     open_main "$cwd"
     printf 'end %s\n' "$label" >>"$D/order"

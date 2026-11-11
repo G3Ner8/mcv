@@ -43,13 +43,23 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    1. Validate names; claim the worker name (`$MCV_HOME/.claims/<name>`), so no second spawn of it
       or of a name that joins the same can run; clear a task folder that has no meta.
    2. Refuse an existing branch, locally or on a remote, ignoring case, and `main`/`master`/`develop`.
+      With `--existing`, the reverse: the branch must be on the remote (checked after the fetch).
    3. Lock the repository (`$MCV_HOME/.locks/<repo key>`), fetch, resolve the base (`--base`, else
       the default branch of `origin` or of the only remote, else HEAD when there is no remote).
+      With `--existing` the base is `<remote>/<branch>`, refused when that is the remote's default
+      branch, when another task's meta names the branch in this repository, or when a local
+      branch of that name is checked out or holds commits the remote lacks; a local branch behind
+      the remote is moved up to it (`update-ref` with the old value) and handed to herdr without
+      `--base`, since herdr checks out an existing local branch as it is. A failed spawn deletes
+      the local branch only if it made it.
    4. `herdr worktree create`, labelled `⧉ <id> · <project>`; if herdr opened a workspace for the
       repository's main checkout with it (none was open before), record its id in
       `.repo-workspaces/<repo key>`. Write meta at once, with the base commit and a `starting`
       marker.
-   5. Check the worktree is not the main checkout; clear the branch's upstream; release the lock.
+   5. Check the worktree is not the main checkout; clear the branch's upstream (with `--existing`:
+      check the worktree is on the branch at the remote's tip and set the remote branch as its
+      upstream); release the lock. Meta records `existing`, and the worker's rules then say the
+      branch is already on the remote and not to open a second request.
    6. Refuse a context that holds the worktree; copy `.worktreeinclude` files; rewrite meta with
       the count.
    7. `herdr agent start` with `--add-dir <context>` (if any) and `--settings` carrying `MCV_TASK`,
@@ -237,7 +247,7 @@ Measured against herdr 0.9.5 (protocol 22) on macOS, 2026-11-06 and 2026-11-07.
 
 | Behaviour | Notes |
 |---|---|
-| `worktree create --cwd --branch --base --label --no-focus` | Returns workspace id, root pane id, worktree path. Reuses an existing branch without complaint, hence spawn's checks. Gives a branch made from a remote-tracking ref that ref as upstream. |
+| `worktree create --cwd --branch --base --label --no-focus` | Returns workspace id, root pane id, worktree path. Reuses an existing branch without complaint, hence spawn's checks. Gives a branch made from a remote-tracking ref that ref as upstream. Measured 2026-11-11: an existing local branch is checked out as it is; `--branch X --base origin/X` with no local X checks out the remote branch with upstream `origin/X`; `--branch X` with no `--base` and no local X makes a new X from HEAD without a word, even when `origin/X` exists, so `spawn --existing` always passes `--base` then. |
 | `agent start <name> --kind claude --pane <id> -- <claude args>` | In a folder Claude has not trusted, stops at the trust dialog (default answer "No, exit") and fails with `agent_not_ready`; once the user picks "Yes", the agent takes prompts. Claude (2.1.319) records that trust under the repository's main checkout, so every worktree of a trusted repository starts without the dialog; a trusted parent folder does not count. Behind the dialog herdr reports the agent `idle` or `blocked` (both seen), and the SessionStart hook has not run. Without the dialog, `rules-loaded` is already written when `agent start` returns. |
 | `agent prompt <name> <text> --wait [--until ...]` | Text starting with `-` is taken as text. Refuses an agent that is not idle or done. |
 | Claude exiting in its pane | herdr either drops the agent (`agent_not_found`) or lists it as done but refuses prompts (`agent_not_ready`, or `agent_not_running` as seen after `/exit`). `pane read` still shows the screen. |

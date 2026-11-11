@@ -187,10 +187,17 @@ append() {
 has_text() { [[ "$(clean "$1")" =~ [^[:space:]] ]]; }
 
 contract_text() {
-  local meta branch context repo parent context_rule=""
+  local meta branch context repo parent context_rule="" existing_rule="" base
   meta="$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}/meta"
   branch="$(jq -r '.branch // empty' "$meta" 2>/dev/null || true)"
   if [[ -n "$branch" ]]; then branch="\`$branch\`"; else branch="the branch you started on"; fi
+  # A branch spawn --existing found on the remote usually has a merge
+  # request open; a second one for the same work is what goes wrong.
+  if [[ "$(jq -r '.existing // false' "$meta" 2>/dev/null || true)" == true ]]; then
+    base="$(jq -r '.base // empty' "$meta" 2>/dev/null || true)"
+    existing_rule="
+- $branch is already on ${base%%/*} ($base), most likely with a merge or pull request open. Commit on it and push to it with a plain git push, which updates that request; never open another one, and never rebase or force-push it. This overrides the rebase and the new request below."
+  fi
   context="$(jq -r '.context // empty' "$meta" 2>/dev/null || true)"
   if [[ -n "$context" ]]; then
     context_rule="
@@ -225,7 +232,7 @@ Rules:
 - If the user types into this window directly, that outranks the coordinator. Even then, ask through needs-decision or in plain text, never AskUserQuestion: it is blocked for workers.
 
 Git, always (mcv's floor, whatever else applies):
-- Work only on $branch. Never commit to, push to, or merge into any other branch, and never to main, master, develop or a protected branch.
+- Work only on $branch. Never commit to, push to, or merge into any other branch, and never to main, master, develop or a protected branch.$existing_rule
 - Never force-push; on your own branch, --force-with-lease only.
 - Never commit secrets (.env files, tokens, keys).
 
