@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.5"
+  version: "0.2.6"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -156,7 +156,11 @@ there, in one line, but the user chooses.
    characters. Keep it to 12 characters when you can: herdr's sidebar shows about that much of a
    worker's label (measured on herdr 0.9.5: `admin-lot1-check` showed as `admin-lot1-c…`). Pick a new branch name following the project's own convention if its CLAUDE.md or
    CONTRIBUTING has one, else `fix/<what>` for a fix and `feat/<what>` for anything else
-   (`fix/cart-total`, `feat/loyalty-csv`).
+   (`fix/cart-total`, `feat/loyalty-csv`). Work that belongs on a branch already pushed, such as
+   review fixes on an open merge request, takes that branch itself with `--existing` (step 5),
+   not a new branch whose commits you then push for the worker (measured: a coordinator did
+   that for 6 review rounds in one day, outside the worker's push dialog, and one push failed
+   unseen).
 3. **Write the task so the worker can do it without you.** The worker sees its own repo, plus the
    `context` folder if the config has one, and nothing of this conversation. Put in the task text
    the facts it needs that it cannot find there: a decision the user made, an endpoint and its
@@ -165,7 +169,8 @@ there, in one line, but the user chooses.
    whole file.
 4. **Confirm before starting.** Show every worker you are about to start and wait for a yes. This
    message asks only this; a yes the user gave to anything else (the config, a file change) does
-   not start a worker. The user may rename ids or branches here. When the repos' bases differ, add each worker's base
+   not start a worker. The user may rename ids or branches here. A worker on an existing branch
+   says so on its line (`on existing branch feat/cart-total`). When the repos' bases differ, add each worker's base
    to its line (`branch fix/cart-total from origin/develop`); when their contexts differ, say
    which workers get none (`no project notes`). At most `max_workers` (default 2) workers are active at
    once. A worker is active from its `spawn` until it reports `done` or `failed`, is `gone`, or is
@@ -184,7 +189,10 @@ there, in one line, but the user chooses.
    `--base <base>` when that repo's settings have one and `--context <absolute path of context>`
    when they have one, except for a repo that is the context folder itself (the project root listed
    among `repos`): it already has that folder's notes, and `spawn` refuses a context inside the
-   repository. Claude's own flags go after `--`; `spawn` refuses `--add-dir` and `--settings`
+   repository. For a branch already on the remote, add `--existing` instead of `--base`: the
+   worker starts at the remote's tip, its plain `git push` updates the merge request, and its
+   rules tell it not to open another. If `spawn` refuses it (the branch is checked out in the
+   main checkout, say), tell the user its reason; never work around it with a new branch. Claude's own flags go after `--`; `spawn` refuses `--add-dir` and `--settings`
    there (either form), and `--base`/`--context` too. It
    prints the task, worktree, branch, base, context and how many files it copied from
    `.worktreeinclude`. If it fails, tell the user its one-line reason. If Claude failed to start,

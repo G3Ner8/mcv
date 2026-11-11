@@ -4,6 +4,22 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] - 2026-11-11
+
+### Added
+
+- `spawn ... <branch> --existing` puts a worker on a branch already on the remote, such as a
+  merge request's branch that needs review fixes. In the third real run, 6 of 17 tasks were such
+  rounds: spawn refused the branch, so the coordinator spawned `<branch>-fix` and pushed the
+  worker's commit into the merge request's branch itself, outside the worker's push dialog, and
+  one of those pushes failed unseen. Now the worktree starts at the remote's tip with the remote
+  branch as its upstream, the worker pushes with a plain `git push` through its own dialog, and
+  its rules tell it not to open a second request. Refused: the remote's default branch and
+  `main`/`master`/`develop`, a branch the remote lacks, one another task works on, and a local
+  branch of that name that is checked out or holds commits the remote lacks (one only behind is
+  moved up to it). Measured on herdr 0.9.5 first: without `--base`, `worktree create` makes a new
+  branch of that name from HEAD without a word, so spawn always passes the remote branch.
+
 ## [0.2.5] - 2026-11-11
 
 From the third run on a real project (17 workers, 2026-11-10).

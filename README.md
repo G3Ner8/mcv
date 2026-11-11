@@ -183,7 +183,14 @@ usage.
   for `--base` rather than branch from a stale HEAD. The
   new branch has no upstream, so a plain `git push` from the worker cannot reach the base branch; the
   worker sets one when it first pushes its own branch. Two spawns in the same repository run one
-  after the other. `--context <folder>` and `.worktreeinclude`: see
+  after the other.
+- `spawn ... <branch> --existing` puts a worker on a branch that is already on the remote instead,
+  such as a merge request's branch that needs review fixes: the worktree starts at the remote's
+  tip with that branch as its upstream, so the worker's plain `git push` updates the request, and
+  its rules tell it not to open another one. It refuses the remote's default branch (and `main`,
+  `master`, `develop`), a branch the remote does not have, one another worker is on, and a local
+  branch of that name that is checked out or holds commits the remote lacks; a local branch that
+  is only behind is moved up first. `remove` keeps the branch. `--context <folder>` and `.worktreeinclude`: see
   [What a worker has](#what-a-worker-has). The worktree goes under `~/.herdr/worktrees/`. If no herdr workspace is open for
   that repository yet, herdr also opens one for its main checkout. herdr's sidebar lists each
   worker under the workspace it takes as that main checkout, which is not always the

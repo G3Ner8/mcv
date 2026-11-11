@@ -15,7 +15,7 @@
 #       Check that herdr, its server, its Claude integration and jq are ready.
 #       Prints {ok, mcv, herdr, server, integration}; mcv is this copy's version
 #       (from ../.claude-plugin/plugin.json, "unknown" when there is none).
-#   spawn <project> <id> <repo-path> <new-branch> [--base <ref>] [--context <folder>] [-- <claude-args>...]
+#   spawn <project> <id> <repo-path> <new-branch> [--base <ref> | --existing] [--context <folder>] [-- <claude-args>...]
 #       Fetch, then create a git worktree of <repo-path> on a branch that must
 #       not exist yet, locally, on a remote or as a tag, in any letter case
 #       (main, master, develop and a remote's own name are always refused,
@@ -39,6 +39,17 @@
 #       place: once the user lets Claude through in its pane, `prompt` works;
 #       otherwise run `remove` before reusing the id. <project>-<id> must not
 #       be the name of another task or herdr agent.
+#       --existing instead puts the worker on a branch already on the remote
+#       (origin, or the only remote), such as an open merge request's branch
+#       that needs review fixes: fetch, then a worktree on that branch at the
+#       remote's tip, with the remote branch as its upstream, so a plain
+#       `git push` updates the request. Refused: the remote's default branch
+#       and main, master, develop; a branch the remote lacks; one another
+#       task works on; a local branch of that name that is checked out
+#       somewhere or has commits the remote lacks (one behind the remote is
+#       moved up to it); --base with it. The worker is told the branch is
+#       already on the remote and not to open another request. Prints
+#       existing: true; remove keeps the branch, as it has an upstream.
 #       Files the repository's .worktreeinclude names (.gitignore syntax),
 #       such as a .env, are copied from <repo-path> into the worktree when the
 #       worktree's git ignores them and has no file there (at most 100).
@@ -350,10 +361,11 @@ CLAIM=""
 
 # What a failed spawn undoes, on any exit (a signal included): the locks,
 # then, until Claude was asked to start, the worktree and the task folder,
-# and the branch this spawn created if no worktree holds it any more. Once
+# and the branch if this spawn created it and no worktree holds it any more. Once
 # Claude was asked to start, the task stays for `remove`.
 NEW_ROOT=""
 NEW_BRANCH=""
+NEW_BRANCH_OWNED=""
 NEW_WS=""
 NEW_DIR=""
 NEW_LABEL=""
@@ -376,7 +388,8 @@ spawn_cleanup() {
       [[ -z "$p" ]] || git -C "$NEW_ROOT" worktree remove --force "$p" >/dev/null 2>&1 || true
     fi
     [[ -z "$NEW_DIR" ]] || rm -rf "$NEW_DIR"
-    [[ -z "$NEW_BRANCH" ]] || git -C "$NEW_ROOT" branch -D "$NEW_BRANCH" >/dev/null 2>&1 || true
+    [[ -z "$NEW_BRANCH" || -z "$NEW_BRANCH_OWNED" ]] \
+      || git -C "$NEW_ROOT" branch -D "$NEW_BRANCH" >/dev/null 2>&1 || true
   fi
   unlock_repo
   [[ -z "$CLAIM" ]] || rm -rf "$CLAIM"
@@ -533,8 +546,8 @@ cmd_doctor() {
 
 cmd_spawn() {
   need_herdr_pane
-  [[ $# -ge 4 ]] || die "usage: spawn <project> <id> <repo-path> <new-branch> [--base <ref>] [--context <folder>] [-- <claude-args>...]"
-  local project="$1" id="$2" repo="$3" branch="$4" base="" context=""
+  [[ $# -ge 4 ]] || die "usage: spawn <project> <id> <repo-path> <new-branch> [--base <ref> | --existing] [--context <folder>] [-- <claude-args>...]"
+  local project="$1" id="$2" repo="$3" branch="$4" base="" context="" existing=""
   shift 4
   # Sound names go in the journal from the start, refusals included; the
   # names are checked again, with their own messages, below.
@@ -545,6 +558,7 @@ cmd_spawn() {
         [[ $# -ge 2 && -n "$2" ]] || die "--base needs a ref, e.g. origin/main"
         base="$2"
         shift 2 ;;
+      --existing) existing=1; shift ;;
       --context)
         [[ $# -ge 2 && -n "$2" ]] || die "--context needs a folder"
         [[ -z "$context" ]] || die "--context given twice"
@@ -560,10 +574,12 @@ cmd_spawn() {
       *) die "unknown option '$1'; Claude's own options go after --" ;;
     esac
   done
+  [[ -z "$existing" || -z "$base" ]] \
+    || die "--existing works on the branch as the remote has it; --base does not apply"
   local a
   for a in "$@"; do
     case "$a" in
-      --base|--base=*|--context|--context=*) die "$a after --: mcv's options go before --, Claude's after" ;;
+      --base|--base=*|--context|--context=*|--existing) die "$a after --: mcv's options go before --, Claude's after" ;;
       # --add-dir would open a folder the context's deny rule does not
       # cover, and --settings could override MCV_TASK.
       --add-dir|--add-dir=*) die "$a after --: spawn refuses it, since the worker could edit that folder; use --context for a read-only folder" ;;
@@ -642,10 +658,12 @@ cmd_spawn() {
     [[ "$lc" != "$(lower "$r")"/* ]] \
       || die "'$branch' starts with the remote name $r; give a plain name such as fix/cart-total"
   done
-  r="$(branch_taken "$root" "$lc")" \
-    && die "branch '$branch' already exists as ${r#refs/} in $root; give the worker a new branch name"
-  r="$(branch_clash "$root" "$lc")" \
-    && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
+  if [[ -z "$existing" ]]; then
+    r="$(branch_taken "$root" "$lc")" \
+      && die "branch '$branch' already exists as ${r#refs/} in $root; give the worker a new branch name"
+    r="$(branch_clash "$root" "$lc")" \
+      && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
+  fi
 
   lock_repo "$root"
   NEW_ROOT="$root"
@@ -675,30 +693,70 @@ cmd_spawn() {
         || die "cannot tell $remote's default branch in $root (offline, or nothing pushed there yet?); pass --base <ref>"
     fi
   fi
+  # An existing branch is worked on as the remote has it: the remote branch
+  # is the base. The remote's default branch is the one every worker starts
+  # from, so it is never a worker's own, whatever it is called.
+  if [[ -n "$existing" ]]; then
+    [[ -n "$remote" ]] || die "--existing takes a branch already on a remote, and $root has none"
+    [[ "$(lower "$base")" != "$(lower "$remote/$branch")" ]] \
+      || die "'$branch' is $remote's default branch; give the worker a branch of its own"
+    base="$remote/$branch"
+  fi
   if [[ -n "$base" ]]; then
     remote="${base%%/*}"
     if git -C "$root" remote get-url "$remote" >/dev/null 2>&1; then
       git -C "$root" fetch --quiet "$remote" || die "git fetch $remote failed in $root"
     fi
+    [[ -z "$existing" ]] || git -C "$root" show-ref --verify --quiet "refs/remotes/$base" \
+      || die "branch '$branch' is not on $remote; --existing takes a branch already pushed there, such as an open merge request's"
     git -C "$root" rev-parse --verify --quiet "$base^{commit}" >/dev/null \
       || die "base '$base' is not a commit in $root"
   fi
-  r="$(branch_taken "$root" "$lc")" \
-    && die "branch '$branch' already exists as ${r#refs/} in $root; give the worker a new branch name"
-  r="$(branch_clash "$root" "$lc")" \
-    && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
+  local reuse="" owned=1
+  if [[ -z "$existing" ]]; then
+    r="$(branch_taken "$root" "$lc")" \
+      && die "branch '$branch' already exists as ${r#refs/} in $root; give the worker a new branch name"
+    r="$(branch_clash "$root" "$lc")" \
+      && die "branch '$branch' cannot sit beside ${r#refs/} in $root (one name would be a folder of the other); give another name"
+  else
+    # Two workers on one branch would push over each other.
+    other="$(jq -r --arg r "$root" --arg b "$branch" 'select(.repo == $r and .branch == $b) | .task' \
+      "$MCV_HOME"/*/tasks/*/meta 2>/dev/null | head -1 || true)"
+    [[ -z "$other" ]] || die "branch '$branch' is already worked on by task $other; send that worker the work, or remove it first"
+    # A local branch of that name is used only when no work of it would be
+    # lost or fought over: not checked out anywhere, and with nothing the
+    # remote lacks. One behind the remote (left by an earlier worker, say)
+    # is moved up to it first; herdr checks a local branch out as it is.
+    local tip here
+    if git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
+      r="$(git -C "$root" worktree list --porcelain \
+        | awk -v b="branch refs/heads/$branch" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
+      [[ -z "$r" ]] || die "branch '$branch' is checked out in $r; switch that checkout to another branch first"
+      tip="$(git -C "$root" rev-parse "refs/remotes/$base")"
+      here="$(git -C "$root" rev-parse "refs/heads/$branch")"
+      git -C "$root" merge-base --is-ancestor "$here" "$tip" \
+        || die "local branch '$branch' in $root has commits $base lacks; push them or delete the local branch first"
+      [[ "$here" == "$tip" ]] || git -C "$root" update-ref "refs/heads/$branch" "$tip" "$here" \
+        || die "could not move local branch '$branch' up to $base"
+      reuse=1
+      owned=""
+    fi
+  fi
 
-  # From here on, a branch named $branch was made by this spawn. The label
+  # From here on, a branch named $branch was made by this spawn, unless
+  # --existing found it already there (then a failure leaves it). The label
   # marks the workspace as mcv's in herdr's sidebar, beside the user's own,
   # with the mark the coordinator's events start with. The task id comes
   # first because the sidebar cuts long labels; herdr already shows the
   # workspace under its repository.
   local label="⧉ $id · $project"
   NEW_BRANCH="$branch"
+  NEW_BRANCH_OWNED="$owned"
   NEW_LABEL="$label"
-  local created ws pane wt linked before opened
+  local created ws pane wt linked before opened hbase="$base"
+  [[ -z "$reuse" ]] || hbase=""
   before="$(repo_workspaces "$root" false)"
-  created="$(h worktree create --cwd "$root" --branch "$branch" ${base:+--base "$base"} \
+  created="$(h worktree create --cwd "$root" --branch "$branch" ${hbase:+--base "$hbase"} \
     --label "$label" --no-focus)"
   # A main-checkout workspace that was not open before was opened for this
   # spawn; the last remove in the repository closes it.
@@ -734,11 +792,11 @@ cmd_spawn() {
     local meta tmp
     meta="$(jq -cn --arg task "$project/$id" --arg agent "$name" --arg ws "$ws" --arg pane "$pane" \
       --arg wt "$wt" --arg repo "$root" --arg branch "$branch" --arg base "${base:-HEAD}" \
-      --arg base_sha "$base_sha" \
+      --arg base_sha "$base_sha" --argjson existing "$([[ -n "$existing" ]] && echo true || echo false)" \
       --arg context "$context" --argjson copied "$copied" --arg created "$created_at" \
       '{task: $task, agent: $agent, workspace_id: $ws, pane_id: $pane, worktree: $wt,
-        repo: $repo, branch: $branch, base: $base, base_sha: $base_sha, context: $context,
-        copied: $copied, created: $created}')"
+        repo: $repo, branch: $branch, base: $base, base_sha: $base_sha, existing: $existing,
+        context: $context, copied: $copied, created: $created}')"
     # Written whole, then renamed, so mcv-watch never reads half a file.
     tmp="$(mktemp "$dir/.meta.XXXXXX")"
     printf '%s\n' "$meta" >"$tmp"
@@ -760,10 +818,20 @@ cmd_spawn() {
   # The branch is created from a remote-tracking ref, so git makes that ref
   # its upstream (origin/main). A plain `git push` or `git pull` in the worker
   # would then target the base branch. The branch has no upstream until the
-  # worker pushes it.
-  git -C "$wt" branch --unset-upstream "$branch" >/dev/null 2>&1 || true
-  if [[ -n "$(git -C "$wt" config "branch.$branch.merge" || true)" ]]; then
-    abandon_worktree "$ws" "could not clear the upstream of '$branch' in $wt"
+  # worker pushes it. An existing branch is the other way round: its
+  # upstream is its own remote branch, so a plain push updates the merge
+  # request, and the worktree must start exactly at the remote's tip.
+  if [[ -n "$existing" ]]; then
+    [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" == "$(git -C "$root" rev-parse "refs/remotes/$base")" \
+       && "$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]] \
+      || abandon_worktree "$ws" "herdr did not check out '$branch' at $base"
+    git -C "$wt" branch --set-upstream-to="$base" "$branch" >/dev/null 2>&1 \
+      || abandon_worktree "$ws" "could not set the upstream of '$branch' to $base in $wt"
+  else
+    git -C "$wt" branch --unset-upstream "$branch" >/dev/null 2>&1 || true
+    if [[ -n "$(git -C "$wt" config "branch.$branch.merge" || true)" ]]; then
+      abandon_worktree "$ws" "could not clear the upstream of '$branch' in $wt"
+    fi
   fi
   unlock_repo
 
@@ -824,8 +892,12 @@ cmd_spawn() {
   fi
   rm -f "$dir/starting"
 
-  journal "ok: branch $branch from ${base:-HEAD}, worktree $wt${context:+, context $context}"
-  jq -c '{task, agent, worktree, branch, base, context, copied}' "$dir/meta"
+  if [[ -n "$existing" ]]; then
+    journal "ok: existing branch $branch at $base, worktree $wt${context:+, context $context}"
+  else
+    journal "ok: branch $branch from ${base:-HEAD}, worktree $wt${context:+, context $context}"
+  fi
+  jq -c '{task, agent, worktree, branch, base, existing, context, copied}' "$dir/meta"
 }
 
 cmd_prompt() {
