@@ -105,6 +105,15 @@ Each session opens with one line naming the version it runs, for example
 `⧉ mcv 0.2.4 · brewly · herdr 0.9.5 · 0 workers`. A session keeps the version it started with:
 after `/plugin marketplace update mcv`, start a new session to use the new one.
 
+Run mcv in a session of its own. Every event a worker sends makes the coordinator read its whole
+conversation again, so what it costs follows the size of that conversation, not the number of
+workers. Measured on a real project: a coordinator started after three hours of planning in the
+same session carried 372K to 652K tokens of context and cost 35% of the run; an earlier run that
+averaged 147K cost 21%. Plan, edit trackers and cut releases in another session. Between batches
+of work, once every worker is removed, no question is open and nothing waits in the queue,
+`/clear` the coordinator and type `/mcv` again: tasks, logs and the watcher's place are kept on
+disk, but the queue and the questions already shown live only in the conversation.
+
 Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
 
 ```
