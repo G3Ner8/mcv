@@ -4,6 +4,20 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] - 2026-11-11
+
+From the third run on a real project (17 workers, 2026-11-10).
+
+### Changed
+
+- The coordinator keeps its conversation small. It cost 35% of that run, against 21% before,
+  because it began after three hours of planning in the same session and carried 372K to 652K
+  tokens of context, which every event reads again. It now suggests another session for work
+  that is not mcv's, and `/clear` between batches once no worker remains; the README says the same.
+- The coordinator starts a new watcher only after the last one's expiry or failure notice, not
+  before every `spawn`: in that run it started one while the last still had 6 minutes left, and
+  the lock refused it.
+
 ## [0.2.4] - 2026-11-10
 
 From checking 0.2.3 on herdr.

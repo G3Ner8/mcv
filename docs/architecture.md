@@ -149,7 +149,9 @@ announced (0 when none). The state outlives the watcher: the Monitor tool ends i
 minutes, and `mcv-watch <project> --resume` goes on from it; started without `--resume`, the
 watcher clears it and starts afresh. The coordinator resumes at once while a worker is busy, and
 otherwise just before its next `spawn` or `prompt` (measured on herdr 0.9.5: it did so, and the
-only event was the new `DONE`), so an idle project costs no wake-ups.
+only event was the new `DONE`), so an idle project costs no wake-ups. It starts one only after
+the last one's expiry or failure notice; the lock refuses a second watcher for the same project
+(measured: one started 24 minutes into the last one's 30 exited at once, with no duplicate events).
 The pane identifies the worker: a task removed and spawned again gets a new pane and a fresh start.
 
 ## Watcher events

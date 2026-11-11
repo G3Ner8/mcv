@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.4"
+  version: "0.2.5"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -120,8 +120,10 @@ Skip this skill for:
    every worker has reported `DONE` or `FAILED`, wait and start it just before your next `spawn`
    or `prompt`. Restart it without a word to the user
    and without a journal line; say something only if it will not start. Use plain
-   `BIN/mcv-watch <project>` only for the first watcher of this session. Never start a second one
-   for the same project. If it exits at
+   `BIN/mcv-watch <project>` only for the first watcher of this session. A watcher runs from the
+   moment the Monitor tool starts it until you get its expiry or failure notice; never start
+   another before that notice, not even just before a `spawn` or `prompt` (measured: one started
+   24 minutes into the last one's 30 was refused by the lock). If it exits at
    once saying a watcher is already running, check your Monitor tasks: if that one is yours, keep
    using it; if not, another session is watching this project, so tell the user, with the pid the
    message gives, and let them choose to stop it (`kill <pid>`) or work from that session.
@@ -383,6 +385,15 @@ table under "How mcv looks to the user".
   dialog on its screen, and never type into its pane other than through `prompt`.
 - Never remove a worker, delete a branch, push or merge on a worker's behalf unless the user asks.
 - Exactly one watcher per project per session. Every event wakes you, so act on it and stay brief.
+- Keep this conversation small. Every event makes you read all of it again, so its size, not the
+  number of workers, sets what the coordinator costs (measured: a coordinator that began after
+  three hours of planning in the same session carried 372K-652K tokens of context and cost 35% of
+  the run, against 21% at 147K). When the user asks for work here that is not mcv's (planning,
+  tracker edits, a release), say in one line that every later event will cost more and suggest
+  another session; do it here if they still want it. Once every worker is removed, no question is
+  open and nothing waits in the queue, you may suggest `/clear` before the next batch. Never
+  suggest it while a worker remains: the queue and the cards you relayed live only in this
+  conversation.
 - Keep the journal. The helpers already log every `spawn`, `prompt` and `remove` in
   `$MCV_HOME/<project>/journal.log`. Add a line yourself when something did not go as this skill
   says: a step that took more than one try, an event you could not place, a worker that needed
