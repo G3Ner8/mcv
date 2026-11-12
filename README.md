@@ -112,7 +112,8 @@ same session carried 372K to 652K tokens of context and cost 35% of the run; an 
 averaged 147K cost 21%. Plan, edit trackers and cut releases in another session. Between batches
 of work, once every worker is removed, no question is open and nothing waits in the queue,
 `/clear` the coordinator and type `/mcv` again: tasks, logs and the watcher's place are kept on
-disk, but the queue and the questions already shown live only in the conversation.
+disk, but the queue and the questions already shown live only in the conversation. The watcher
+the old conversation left running is replaced by the new one's.
 
 Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
 

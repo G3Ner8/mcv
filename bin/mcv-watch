@@ -7,7 +7,10 @@
 # Usage:
 #   mcv-watch <project>            poll every MCV_WATCH_INTERVAL seconds (default 5) until killed;
 #                                  exits 1 at once if a watcher for <project> already runs
-#                                  (lock: $MCV_HOME/<project>/watch.lock); starts afresh, for a
+#                                  (lock: $MCV_HOME/<project>/watch.lock), unless that one
+#                                  was started by the same Claude process (a conversation
+#                                  before /clear): then it stops it, exit 0 there, and
+#                                  says so on stderr; starts afresh, for a
 #                                  coordinator that has not seen this project's events
 #   mcv-watch <project> --resume   the same, going on from where the last watcher of
 #                                  <project> stopped: nothing it printed is printed again
@@ -47,7 +50,12 @@
 # previous state event was needs-decision, blocked, done or failed, because
 # that line already woke the coordinator, and when a DELIVER goes out for
 # the same stop. A turn that ends with no log line, or after only a note,
-# does print it: then the coordinator reads the screen.
+# does print it: then the coordinator reads the screen. Not, though, when
+# the worker owes nothing: its last report (notes and waits aside) was a
+# question, a block, done or failed, and the journal shows no prompt sent
+# to it since. A note after its question, or Claude compacting an idle
+# worker's context, ends a turn that way (measured: 3 of 3 STOPPED in one
+# run), and a wait it announces then is not timed either.
 # A turn that ends right after a waiting line is the stop the worker
 # announced and prints nothing; if the worker is still stopped
 # MCV_WATCH_WAIT_LIMIT seconds later (default 1800; 0: never), STOPPED is
@@ -64,7 +72,9 @@
 # Environment: MCV_HOME (default ~/.claude/mcv), MCV_WATCH_INTERVAL,
 # MCV_WATCH_WAIT_LIMIT, MCV_WATCH_STATE (state folder, kept as it is even
 # without --resume; default $MCV_HOME/<project>/watch-state, required with
-# --once), MCV_WATCH_NOW (the clock in seconds, for tests), MCV_HERDR (the
+# --once), MCV_WATCH_NOW (the clock in seconds, for tests), MCV_WATCH_OWNER
+# (the pid of the Claude process the watcher belongs to, found by itself
+# when unset; empty: none, so it never replaces another), MCV_HERDR (the
 # herdr helper; default: mcv-herdr.sh next to this file).
 
 set -euo pipefail
@@ -125,6 +135,24 @@ emit() {
     *)              label="$(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]')"; text="$f5" ;;
   esac
   printf '⧉ %s · %s%s\n' "${task#*/}" "$label" "${text:+ · $text}"
+}
+
+# True when the worker of task $2 (log $1) has said its piece and been sent
+# nothing since: its last report, notes and waits aside, is a question, a
+# block, done or failed, and the journal has no prompt sent to it after
+# that line. Such a worker owes the coordinator nothing, so a turn of its
+# own that ends without a report (a note after its question, Claude
+# compacting an idle session) is not a stop to look at. Times are the logs'
+# own UTC stamps, which sort as text. Something the user typed into the
+# worker's pane is not in the journal; they were there to see it stop.
+settled() {
+  local last sent
+  last="$(awk -F'\t' '$2 == "needs-decision" || $2 == "blocked" || $2 == "done" || $2 == "failed" { t = $1 }
+    END { print t }' "$1" 2>/dev/null || true)"
+  [[ -n "$last" ]] || return 1
+  sent="$(awk -F'\t' -v k="$2" '$2 == "prompt" && $3 == k && $4 ~ /^ok:/ { t = $1 } END { print t }' \
+    "$MCV_HOME/${2%%/*}/journal.log" 2>/dev/null || true)"
+  [[ -z "$sent" || "$sent" < "$last" ]]
 }
 
 # One poll. The state folder has one subfolder per project, so watchers of
@@ -316,6 +344,10 @@ poll() {
           :
         elif [[ "$status" == "done" ]] && [[ "$lastkind" =~ ^(needs-decision|blocked|done|failed)$ ]]; then
           :
+        elif [[ "$status" == "done" ]] && settled "$log" "$task"; then
+          # Nothing was asked of it since its last report: neither a stop
+          # to read nor a wait to time.
+          :
         elif [[ "$status" == "done" && "$lastkind" == waiting ]]; then
           # The stop the worker announced: count the wait from here.
           ws="$nowsec"
@@ -370,12 +402,50 @@ holder() {
   pid="$(cat "$lock/pid" 2>/dev/null || true)"
   [[ "$pid" =~ ^[0-9]+$ ]] && ps -p "$pid" -o command= 2>/dev/null | grep -q mcv-watch && printf '%s' "$pid"
 }
+# The Claude process this watcher runs under: the nearest ancestor whose
+# command is `claude` (measured: a Monitor command's parent shell is its
+# child). Nothing when there is none, or when it cannot be told.
+# MCV_WATCH_OWNER, even empty, replaces the search; the tests use it.
+claude_ancestor() {
+  local p=$$ c i=0
+  while (( i < 8 )); do
+    i=$((i + 1))
+    p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+    [[ "$p" =~ ^[0-9]+$ ]] && (( p > 1 )) || return 0
+    c="$(ps -o command= -p "$p" 2>/dev/null || true)"
+    c="${c%% *}"
+    if [[ "${c##*/}" == claude ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+}
+owner="${MCV_WATCH_OWNER-$(claude_ancestor)}"
 refuse_if_held() {
-  local pid
+  local pid i
   # A watcher starting this instant has made the lock but not yet written
   # its pid.
   [[ -s "$lock/pid" ]] || sleep 1
   if pid="$(holder)"; then
+    # /clear starts a new conversation in the same Claude process and
+    # leaves the old one's watcher running for up to 30 minutes, lock and
+    # all (measured: a task waited 22 minutes for it). That watcher is this
+    # session's own: stop it and carry on. It exits 0 on TERM, so its
+    # Monitor reports an end, not a failure; what it had read is in the
+    # state folder. One of another Claude process, or of unknown origin,
+    # is somebody else's.
+    if [[ -n "$owner" && "$(cat "$lock/owner" 2>/dev/null || true)" == "$owner" ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      i=0
+      while (( i < 25 )) && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.2
+        i=$((i + 1))
+      done
+      if ! kill -0 "$pid" 2>/dev/null; then
+        printf 'mcv-watch: replaced the earlier watcher of this Claude session (pid %s), left running by /clear\n' "$pid" >&2
+        return 0
+      fi
+    fi
     printf 'mcv-watch: a watcher for %s is already running (pid %s); use that one, or if no session is reading it, stop it with: kill %s\n' \
       "$project" "$pid" "$pid" >&2
     exit 1
@@ -397,6 +467,7 @@ until mkdir "$lock" 2>/dev/null; do
     trap 'rmdir "$takeover" 2>/dev/null' EXIT
     [[ ! -e "$lock" ]] || { refuse_if_held; rm -rf "$lock"; }
     if mkdir "$lock" 2>/dev/null; then
+      printf '%s\n' "$owner" >"$lock/owner"
       printf '%s\n' "$$" >"$lock/pid"
       rmdir "$takeover"
       trap - EXIT
@@ -410,6 +481,7 @@ until mkdir "$lock" 2>/dev/null; do
   waited=$((waited + 1))
   (( waited < 25 )) || { rmdir "$takeover" 2>/dev/null; waited=0; }
 done
+printf '%s\n' "$owner" >"$lock/owner"
 printf '%s\n' "$$" >"$lock/pid"
 
 # The state outlives the watcher, so that one restarted with --resume after

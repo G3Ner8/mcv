@@ -107,6 +107,7 @@ $MCV_HOME/
   .locks/<repo key>/pid               held while one spawn fetches and creates a worktree there
   .repo-workspaces/<repo key>         id of the main-checkout workspace herdr opened for a spawn
   <project>/watch.lock/pid            held by the one mcv-watch of that project
+  <project>/watch.lock/owner          pid of the Claude process that watcher runs under, or empty
   <lock>.takeover/                    next to any lock below, held while one process takes it over
   <project>/tasks/<id>/
     meta                              JSON, written whole and renamed into place
@@ -140,7 +141,13 @@ after `answered`, holds a correction sent later, so the log says what the worker
 pid has exited without releasing it is taken over, but only when it is unchanged since read and at
 least 2 seconds old, so a lock another process has just taken is never deleted. A claim or repo lock
 with no pid (its holder was killed between making it and writing the pid) is taken over once it is
-a minute old. The watch lock holds only a pid and counts as held while that pid is an mcv-watch.
+a minute old. The watch lock counts as held while its pid is an mcv-watch. It also names its
+owner, the nearest ancestor process whose command is `claude` (measured: a Monitor command runs in
+a shell that is that process's child). A new watcher with the same owner stops the holder with
+TERM, on which it exits 0, and takes the lock: `/clear` starts a new conversation in the same
+Claude process and leaves the old conversation's watcher running for up to 30 minutes (measured in
+the fourth real run, three times; one task waited 22 minutes for the lock). With another owner, or
+none on either side, the new watcher is refused.
 
 Every lock is taken over only under a second lock, `<lock>.takeover`, whose holder checks the
 lock again, deletes it, makes its own and writes its pid before letting go. Without it, two
@@ -157,7 +164,8 @@ was down, delivered is the log line up to which pending answers were already del
 pending line is delivered once, and waiting since is the time of the stop a `waiting` line
 announced (0 when none). The state outlives the watcher: the Monitor tool ends it after 30
 minutes, and `mcv-watch <project> --resume` goes on from it; started without `--resume`, the
-watcher clears it and starts afresh. The coordinator resumes at once while a worker is busy, and
+watcher clears it and starts afresh. The coordinator resumes at once while a worker is busy
+(working, at a dialog, or in a wait it announced; a question waiting for the user is not busy), and
 otherwise just before its next `spawn` or `prompt` (measured on herdr 0.9.5: it did so, and the
 only event was the new `DONE`), so an idle project costs no wake-ups. It starts one only after
 the last one's expiry or failure notice; the lock refuses a second watcher for the same project
@@ -192,6 +200,12 @@ the end of the task. A worker that waits on a sub-agent or a build has to end it
 Code refuses a long foreground `sleep` and says to wait in the background (measured). It says so
 first with a `waiting` line; the stop that follows prints nothing, unless the worker is still
 stopped `MCV_WATCH_WAIT_LIMIT` seconds later (default 1800), which prints `STOPPED` once.
+A worker that owes nothing gets no `STOPPED` and no timed wait: its last report (notes and waits
+aside) is a question, a block, done or failed, and `journal.log` has no `prompt ... ok:` line
+for it after that report's time. In the fourth real run all three `STOPPED` were of that kind: a
+note sent right after a question, and twice Claude compacting the context of a worker that had
+been idle for 55 minutes. A prompt the user types into the pane is not journaled, so a silent
+stop after one is not reported.
 `note` and `waiting` lines are never printed: each printed line costs a coordinator turn at its
 full context, and in the second real run notes, restarts and stops during waits were about a
 fifth of the coordinator's cost. On its first poll without `--resume` the watcher prints the

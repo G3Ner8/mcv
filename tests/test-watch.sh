@@ -20,6 +20,9 @@ root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
 export MCV_HOME="$root/home" MCV_HERDR="$HERE/fixtures/stub-herdr.sh" STUB_AGENTS="$root/agents"
 export MCV_WATCH_STATE="$root/state"
+# No Claude process to belong to, unless a check says so: run from a Claude
+# session, every watcher here would otherwise find the same one.
+export MCV_WATCH_OWNER=""
 mkdir -p "$MCV_WATCH_STATE"
 # The checks below read the raw, tab-separated form; the readable form the
 # coordinator sees is checked at the end.
@@ -33,6 +36,8 @@ task() { # <id> <pane>
 agents() { printf '%s' "$*" | tr '|' '\n' | tr ',' '\t' >"$STUB_AGENTS"; }  # "p1,working,3,acme-a|..."
 say() { MCV_TASK="acme/$1" "$STATUS" "$2" "$3" >/dev/null; }                  # <id> <kind> <text>
 poll() { "$W" acme --once; }
+# A prompt sent to a worker, as mcv-herdr.sh journals it: <UTC time> <id>.
+sent() { mkdir -p "$MCV_HOME/acme"; printf '%s\tprompt\tacme/%s\tok: sent 5 characters, state working\n' "$1" "$2" >>"$MCV_HOME/acme/journal.log"; }
 count() { if [[ -z "$1" ]]; then echo 0; else printf '%s\n' "$1" | wc -l | tr -d ' '; fi; }
 
 # Without a state folder, --once refuses.
@@ -73,7 +78,9 @@ out="$(poll)"
 expect "turn end after a question in an earlier poll: no event" '[[ -z "$out" ]]' "$out"
 
 # A note is for the status table, not a wake: alone it prints nothing, and a
-# turn that ends after only a note is still a stop to look at.
+# turn that ends after only a note is still a stop to look at, once the
+# worker has been sent something after its questions (here, their answers).
+sent 2999-01-01T00:00:00Z a
 agents "w:p1,working,5,acme-a|w:p2,done,4,acme-b|w:p3,blocked,2,acme-c"
 poll >/dev/null
 say a note "halfway"
@@ -403,6 +410,47 @@ expect "a lock left by a dead watcher is taken over" 'kill -0 "$wpid" 2>/dev/nul
 kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
 expect "a stopped watcher releases its lock" '[[ ! -e "$MCV_HOME/acme/watch.lock" ]]'
 
+# /clear starts a new conversation in the same Claude process and leaves the
+# old conversation's watcher running, lock and all, for up to 30 minutes
+# (measured: three times in one day; once a task waited 22 minutes for it).
+# A watcher started by the same Claude process replaces it; one from another
+# process, or one that cannot tell, is refused as before.
+MCV_WATCH_OWNER=4242 MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
+wpid=$!
+sleep 1
+second() { # <owner>: start a second watcher; sets w2, rc ("running" or its exit status) and out
+  MCV_WATCH_OWNER="$1" MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >"$root/w2.out" 2>&1 &
+  w2=$!
+  sleep 2
+  if kill -0 "$w2" 2>/dev/null; then rc=running; else wait "$w2"; rc=$?; fi
+  out="$(cat "$root/w2.out")"
+}
+second 9999
+expect "a watcher of another Claude process is refused" \
+  '[[ $rc == 1 && "$out" == *"already running"*"$wpid"* ]] && kill -0 "$wpid" 2>/dev/null' "rc=$rc $out"
+second ""
+expect "a watcher that cannot tell its Claude process is refused" \
+  '[[ $rc == 1 && "$out" == *"already running"* ]] && kill -0 "$wpid" 2>/dev/null' "rc=$rc $out"
+second 4242
+# Never wait on a watcher that is still running: it would hang the suite.
+if kill -0 "$wpid" 2>/dev/null; then kill -KILL "$wpid"; wait "$wpid" 2>/dev/null; first_rc=alive; else wait "$wpid" 2>/dev/null; first_rc=$?; fi
+expect "a watcher of the same Claude process replaces the earlier one" \
+  '[[ $rc == running && $first_rc != alive ]] && [[ "$(cat "$MCV_HOME/acme/watch.lock/pid" 2>/dev/null)" == "$w2" ]]' \
+  "rc=$rc first=$first_rc $out lock=$(cat "$MCV_HOME/acme/watch.lock/pid" 2>/dev/null) w2=$w2"
+expect "the replaced watcher ended cleanly, so its Monitor reports no failure" '[[ $first_rc == 0 ]]' "rc=$first_rc"
+expect "it says what it replaced" '[[ "$out" == *"replaced"*"$wpid"* ]]' "$out"
+kill -TERM "$w2" 2>/dev/null; wait "$w2" 2>/dev/null
+rm -rf "$MCV_HOME/acme/watch.lock"
+# A holder from an older mcv wrote no owner: refused.
+MCV_WATCH_OWNER=4242 MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
+wpid=$!
+sleep 1
+rm -f "$MCV_HOME/acme/watch.lock/owner"
+second 4242
+expect "a holder with no owner recorded is refused" \
+  '[[ $rc == 1 && "$out" == *"already running"* ]] && kill -0 "$wpid" 2>/dev/null' "rc=$rc $out"
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+
 # Several watchers that find the same stale lock at the same moment: exactly
 # one takes it over and the rest refuse. Each round starts four at once; the
 # race is a matter of timing, so a few rounds make a miss unlikely.
@@ -515,6 +563,72 @@ out="$(MCV_WATCH_NOW=9000 poll)"
 expect "no stuck wait after the report" '[[ -z "$out" ]]' "$out"
 unset MCV_WATCH_WAIT_LIMIT
 
+# A worker that has said its piece (a question, done, failed, blocked) and
+# has been sent nothing since owes the coordinator nothing: a later turn
+# that ends without a report is not a stop to look at. Measured in a real
+# run: a note sent right after a question, and Claude compacting an idle
+# worker's context 55 minutes after its question, each gave a STOPPED.
+# The journal says when a prompt was sent.
+rm -rf "$MCV_HOME/acme/tasks" "$MCV_HOME/acme/journal.log"
+export MCV_WATCH_WAIT_LIMIT=600
+task s w:p12
+agents "w:p12,working,1,acme-s"
+sent 2000-01-01T00:00:00Z s
+MCV_WATCH_NOW=1000 poll >/dev/null
+say s needs-decision "Stash or a private ref?"
+say s note "part 1 done; part 2 waits on the question"
+agents "w:p12,done,2,acme-s"
+out="$(MCV_WATCH_NOW=1010 poll)"
+expect "a note right after a question does not turn the stop into STOPPED" \
+  '[[ $(count "$out") -eq 1 && "$out" == *"needs-decision"* ]]' "$out"
+agents "w:p12,working,3,acme-s"
+MCV_WATCH_NOW=4000 poll >/dev/null
+agents "w:p12,done,4,acme-s"
+out="$(MCV_WATCH_NOW=4010 poll)"
+expect "an idle worker's silent turn after its question (a compaction): nothing" '[[ -z "$out" ]]' "$out"
+# The same with a wait announced after the question: no stuck wait later.
+say s needs-decision "Run the real pair test?"
+say s waiting "the answer to the question"
+MCV_WATCH_NOW=4020 poll >/dev/null
+agents "w:p12,working,5,acme-s"
+MCV_WATCH_NOW=4030 poll >/dev/null
+agents "w:p12,done,6,acme-s"
+out="$(MCV_WATCH_NOW=4040 poll)"
+expect "a wait announced for the user's answer: nothing" '[[ -z "$out" ]]' "$out"
+out="$(MCV_WATCH_NOW=9000 poll)"
+expect "and no stuck wait past the limit while the question is open" '[[ -z "$out" ]]' "$out"
+# Once something is sent to it, a silent stop is a stop again.
+sent 2999-01-01T00:00:00Z s
+agents "w:p12,working,7,acme-s"
+MCV_WATCH_NOW=9100 poll >/dev/null
+agents "w:p12,done,8,acme-s"
+out="$(MCV_WATCH_NOW=9110 poll)"
+expect "after a prompt, a silent stop is STOPPED" \
+  '[[ $(count "$out") -eq 1 && "$out" == *"state"$'"'"'\t'"'"'"done" ]]' "$out"
+# A prompt that was refused sent nothing.
+rm -f "$MCV_HOME/acme/journal.log"
+printf '2999-01-01T00:00:00Z\tprompt\tacme/s\terror: worker acme/s is working\n' >>"$MCV_HOME/acme/journal.log"
+say s "done" "committed"
+MCV_WATCH_NOW=9200 poll >/dev/null
+agents "w:p12,working,9,acme-s"
+MCV_WATCH_NOW=9210 poll >/dev/null
+agents "w:p12,done,10,acme-s"
+MCV_WATCH_NOW=9220 poll >/dev/null
+agents "w:p12,working,11,acme-s"
+MCV_WATCH_NOW=9230 poll >/dev/null
+agents "w:p12,done,12,acme-s"
+out="$(MCV_WATCH_NOW=9240 poll)"
+expect "a refused prompt does not count: a later silent turn after done is nothing" '[[ -z "$out" ]]' "$out"
+# A worker that never reported is still a stop, prompt or not.
+task s2 w:p13
+agents "w:p12,done,12,acme-s|w:p13,working,1,acme-s2"
+MCV_WATCH_NOW=9300 poll >/dev/null
+agents "w:p12,done,12,acme-s|w:p13,done,2,acme-s2"
+out="$(MCV_WATCH_NOW=9310 poll)"
+expect "a worker with no report at all: a silent stop is STOPPED" \
+  '[[ $(count "$out") -eq 1 && "$out" == *"acme/s2"*"state"$'"'"'\t'"'"'"done" ]]' "$out"
+unset MCV_WATCH_WAIT_LIMIT
+
 # A watcher restarted with --resume (the Monitor tool ended the last one)
 # carries on where it stopped: nothing is shown again. Started without it,
 # as for a new coordinator, the open questions are shown once more.
@@ -561,6 +675,7 @@ expect "readable: a dialog is WAITING" '[[ "$out" == "⧉ v · WAITING · a dial
 agents "w:p8,working,3,acme-v"
 out="$(poll)"
 expect "readable: leaving it is RESUMED" '[[ "$out" == "⧉ v · RESUMED · "* ]]' "$out"
+sent 2999-01-01T00:00:00Z v
 agents "w:p8,done,4,acme-v"
 out="$(poll)"
 expect "readable: a turn end with no report is STOPPED, telling to read the screen" \
