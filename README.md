@@ -1,9 +1,9 @@
 # mcv
 
-> **Experimental, not yet tried end to end (0.1.0).** Every part is written and checked on its own:
-> the `/mcv` skill the coordinator follows, the hooks that set up a worker, `bin/mcv-herdr.sh`,
-> `bin/mcv-status` and `bin/mcv-watch`. A full run on a real project, from the first task to a merge
-> request, has not been done yet. Expect rough edges.
+> **Early: in daily use on one project.** mcv has run a real project (two repositories) on five
+> days, more than fifty workers, most of them from a task to a merge request, and every release since 0.2.1
+> comes from what those runs showed (see the [changelog](CHANGELOG.md)). It has been used by one
+> person, on macOS with herdr 0.9.5 only. Expect rough edges.
 
 mcv lets you run several Claude Code sessions on one project at once, while you talk to only one of
 them.

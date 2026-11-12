@@ -690,5 +690,88 @@ agents ""
 out="$(poll)"
 expect "readable: GONE" '[[ "$out" == "⧉ v · GONE · "* ]]' "$out"
 
+# The Monitor tool cuts a line at about 500 characters and a notification
+# at about 3000 (measured: 400 arrived whole, 600 was cut; seven lines of
+# 420 arrived, the eighth was cut). In a real run 13 of 22 questions were
+# longer than a line, and the coordinator read the log again for each. A
+# long text is printed over several lines, cut at characters, not bytes:
+# joined with nothing between, the pieces give the text back.
+rm -rf "$MCV_HOME/acme/tasks" "$MCV_WATCH_STATE"/acme
+task x w:p20
+agents "w:p20,working,1,acme-x"
+poll >/dev/null
+pieces() { sed -e '1s/^⧉ x · [A-Z]* [a-z0-9]* · //' -e '2,$s/^  …//' <<<"$1" | tr -d '\n'; }   # the text back
+longest() { jq -Rn '[inputs | length] | max' <<<"$1"; }
+long="$(printf 'Keep the server message on the page as an alert, or the self-closing toast? %.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13)"
+long="${long% }"
+say x needs-decision "$long"
+out="$(poll)"
+expect "a long question comes over several lines, none past 450 characters" \
+  '[[ $(count "$out") -ge 3 && $(longest "$out") -le 450 ]]' "lines=$(count "$out") longest=$(longest "$out")"
+expect "its first line is the usual header, the others are marked as continuations" \
+  '[[ "$(sed -n 1p <<<"$out")" == "⧉ x · QUESTION q1 · Keep the server"* ]] && ! sed 1d <<<"$out" | grep -qv "^  …"' "$out"
+expect "joined, the lines give the question back" '[[ "$(pieces "$out")" == "$long" ]]' "$(pieces "$out")"
+thai="$(printf 'กรอบสองชั้นใน Authority Setting วัดแล้วมีกรอบจริงหรือเป็นของหน้าเทียบ %.0s' 1 2 3 4 5 6 7 8 9 10 11 12)"
+thai="${thai% }"
+say x needs-decision "$thai"
+out="$(poll)"
+expect "Thai text is cut between characters and comes back whole" \
+  '[[ $(count "$out") -ge 2 && $(longest "$out") -le 450 && "$(pieces "$out")" == "$thai" ]]' \
+  "lines=$(count "$out") longest=$(longest "$out")"
+say x needs-decision "Session or query string?"
+out="$(poll)"
+expect "a short text stays on one line" '[[ "$out" == "⧉ x · QUESTION q3 · Session or query string?" ]]' "$out"
+huge="$(printf 'word%.0s ' $(seq 1 800))"
+say x needs-decision "$huge"
+out="$(poll)"
+expect "a text past one notification is cut at 2600 characters and says where the rest is" \
+  '[[ $(jq -Rs length <<<"$out") -le 2900 && "$(tail -1 <<<"$out")" == "  …(cut here: the full text is in the task'"'"'s status.log)" ]]' \
+  "chars=$(jq -Rs length <<<"$out") last=$(tail -1 <<<"$out")"
+
+# A worker at a dialog: the event carries what the dialog shows, so the
+# coordinator need not read the screen (measured: one read for each of 28).
+# The screen is the one a real worker showed at a push.
+screen="$root/screen"
+cat >"$screen" <<'EOF'
+⏺ Bash(git push -u origin feat/3.2.2-customer-master-r5 2>&1 | tail -3)
+  ⎿  Running…
+
+────────────────────────────────────────────────────────────────────────
+ Bash command
+ Run shell command
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ git push -u origin feat/3.2.2-customer-master-r5 2>&1 | tail -3
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Ask rule Bash(git push *) overrides auto mode for this command.
+ /permissions to let auto mode decide
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend
+EOF
+agents "w:p20,blocked,2,acme-x"
+out="$(STUB_SCREEN="$screen" poll)"
+expect "WAITING carries the dialog as the screen shows it" \
+  '[[ "$(sed -n 1p <<<"$out")" == "⧉ x · WAITING · a dialog is open in its pane:" ]] \
+   && grep -qxF "  | git push -u origin feat/3.2.2-customer-master-r5 2>&1 | tail -3" <<<"$out" \
+   && grep -qxF "  | Do you want to proceed?" <<<"$out" && grep -qxF "  | 1. Yes" <<<"$out"' "$out"
+expect "without the rules, the text above the dialog or the key hints" \
+  '! grep -q "╌\|─\|Running\|Esc to cancel" <<<"$out" && ! sed 1d <<<"$out" | grep -qv "^  | "' "$out"
+agents "w:p20,working,3,acme-x"
+poll >/dev/null
+printf 'no dialog rule on this screen\n' >"$screen"
+agents "w:p20,blocked,4,acme-x"
+out="$(STUB_SCREEN="$screen" poll)"
+expect "a screen with no dialog on it: the plain line, to be read" \
+  '[[ "$out" == "⧉ x · WAITING · a dialog is open in its pane" ]]' "$out"
+agents "w:p20,working,5,acme-x"
+poll >/dev/null
+agents "w:p20,blocked,6,acme-x"
+out="$(poll)"
+expect "a screen that cannot be read: the plain line" \
+  '[[ "$out" == "⧉ x · WAITING · a dialog is open in its pane" ]]' "$out"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

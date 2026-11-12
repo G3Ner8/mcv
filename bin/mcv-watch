@@ -24,7 +24,10 @@
 #   ⧉ <id> · BLOCKED · <text>          the worker reports it cannot go on
 #   ⧉ <id> · DONE · <text>             the worker reports its task finished
 #   ⧉ <id> · FAILED · <text>           the worker reports its task failed
-#   ⧉ <id> · WAITING · ...             it stopped at an approval or question dialog in its pane
+#   ⧉ <id> · WAITING · ...             it stopped at an approval or question dialog in its pane;
+#                                      what the dialog shows follows, one line each
+#                                      marked "  | " (the screen below its last full
+#                                      rule; at most 10 lines), when it can be read
 #   ⧉ <id> · RESUMED · ...             it left that dialog and is working again
 #   ⧉ <id> · STOPPED · ...             its turn ended with no report (see below), or a wait
 #                                      it announced has lasted past the limit: read its screen
@@ -34,6 +37,11 @@
 #   ⧉ <id> · GONE · ...                the worker's pane is no longer there (not while
 #                                      spawn is still starting it)
 # A log kind this list does not name is printed in capitals the same way.
+# A text longer than 400 characters goes over several lines, each later one
+# marked "  …" and going on where the line above stopped (the Monitor tool
+# cuts a line at about 500 characters and a notification at about 3000);
+# past 2600 characters it stops and the last line says the rest is in the
+# task's status.log.
 # MCV_WATCH_RAW=1 prints the same events tab-separated instead, for scripts
 # and tests: "<time> <project>/<id> <kind> <qid|-> <text>", where kind is a
 # log kind, "deliver", "gone", or "state" with blocked, working or done (a
@@ -113,12 +121,15 @@ emit() {
     printf '%s\n' "$1"
     return
   fi
-  local ts task kind f4 f5 label text=""
+  local ts task kind f4 f5 label text="" dialog=""
   IFS=$'\t' read -r ts task kind f4 f5 <<<"$1"
   case "$kind" in
     state)
       case "$f4" in
-        blocked) label=WAITING; text="a dialog is open in its pane" ;;
+        blocked)
+          label=WAITING; text="a dialog is open in its pane"
+          dialog="$(dialog_of "$task")"
+          [[ -z "$dialog" ]] || text="$text:" ;;
         working) label=RESUMED; text="it left the dialog and is working again" ;;
         done)
           label=STOPPED
@@ -134,7 +145,71 @@ emit() {
     needs-decision) label="QUESTION $f4"; text="$f5" ;;
     *)              label="$(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]')"; text="$f5" ;;
   esac
-  printf '⧉ %s · %s%s\n' "${task#*/}" "$label" "${text:+ · $text}"
+  say_event "⧉ ${task#*/} · $label" "$text"
+  [[ -z "$dialog" ]] || printf '%s\n' "$dialog"
+}
+
+# Print a header and its text. The Monitor tool cuts a line at about 500
+# characters and a notification at about 3000 (measured), and a cut
+# question made the coordinator read the log again. A text longer than
+# LINE goes over several lines, each later one marked "  …": joined with
+# nothing between, they give the text back. jq does the cutting, by
+# character whatever the locale; bash would cut Thai between bytes under
+# LC_ALL=C. Past MAXTEXT the text stops and the last line says where the
+# rest is.
+LINE=400
+MAXTEXT=2600
+say_event() {
+  local head="$1" text="$2" cut="(cut here: the full text is in the task's status.log)"
+  if (( ${#text} > LINE )) && jq -rn --arg h "$head" --arg t "$text" --arg c "$cut" \
+      --argjson n "$LINE" --argjson max "$MAXTEXT" '
+      ($t | length) as $len
+      | (if $len > $max then $t[0:$max] else $t end) as $s
+      | [range(0; ($s | length); $n) as $i | $s[$i:$i + $n]] as $p
+      | ($h + " · " + $p[0]), ($p[1:][] | "  …" + .),
+        (if $len > $max then "  …" + $c else empty end)' 2>/dev/null; then
+    return 0
+  fi
+  printf '%s%s\n' "$head" "${text:+ · $text}"
+}
+
+# What the dialog of task $1 shows, one line each marked "  | ", so the
+# coordinator can describe it without reading the screen (measured: one
+# read for each of 28 dialogs in a run). Claude Code draws a dialog under a
+# full-width rule at the bottom of the screen: the lines after the last
+# such rule are taken as they are, without the dashed rules inside it, the
+# pointer in front of the first answer and the key hints. Nothing when the
+# screen cannot be read or has no such rule; at most 10 lines of 300.
+dialog_of() {
+  local screen l bare found=0 n=0
+  local -a shown=()
+  screen="$("$HERDR" read "$1" 40 2>/dev/null)" || return 0
+  while IFS= read -r l; do
+    bare="${l//─/}"
+    bare="${bare//[[:space:]]/}"
+    if [[ -z "$bare" && "$l" == *─* ]]; then
+      found=1
+      shown=()
+      continue
+    fi
+    bare="${l//╌/}"
+    bare="${bare//[[:space:]]/}"
+    [[ -n "$bare" ]] || continue
+    # Leading spaces, a box edge and the answer pointer are layout.
+    l="${l#"${l%%[![:space:]]*}"}"
+    l="${l#│}"
+    l="${l#❯}"
+    l="${l#"${l%%[![:space:]]*}"}"
+    l="${l%"${l##*[![:space:]]}"}"
+    [[ -n "$l" && "$l" != "Esc to cancel"* ]] || continue
+    shown+=("$l")
+  done <<<"$screen"
+  (( found )) || return 0
+  for l in ${shown[@]+"${shown[@]}"}; do
+    (( n < 10 )) || break
+    n=$((n + 1))
+    printf '  | %s\n' "${l:0:300}"
+  done
 }
 
 # True when the worker of task $2 (log $1) has said its piece and been sent

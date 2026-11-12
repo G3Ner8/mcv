@@ -206,6 +206,20 @@ for it after that report's time. In the fourth real run all three `STOPPED` were
 note sent right after a question, and twice Claude compacting the context of a worker that had
 been idle for 55 minutes. A prompt the user types into the pane is not journaled, so a silent
 stop after one is not reported.
+An event carries what the coordinator needs to act on it, because each tool call it makes
+afterwards is another call at its full context. Measured in the fourth real run: every one of 28
+`WAITING` events was followed by a `read` of the dialog, and 15 of 21 questions took a second
+call, 11 of them to read `status.log`, because the Monitor tool cuts a line at about 500
+characters (400 arrived whole, 600 was cut) and 15 of the 22 questions were longer than 400. It
+cuts a notification at about 3000 (seven lines of 420 arrived, the eighth was cut). So a text
+longer than 400 characters is printed over several lines, each later one marked `  …`, cut by
+jq at characters, not bytes; past 2600 it stops and the last line points to `status.log`. And
+`WAITING` is followed by what the dialog shows, each line marked `  | `: the worker's screen
+(`mcv-herdr.sh read`, 40 lines) below its last full-width rule, without the dashed rules, the
+answer pointer and the key hints, at most 10 lines; nothing when there is no such rule. The
+notification drops the leading spaces, so the marks arrive as `…` and `|`. A `DONE` needs
+nothing more: 36 of 56 were handled in one call.
+
 `note` and `waiting` lines are never printed: each printed line costs a coordinator turn at its
 full context, and in the second real run notes, restarts and stops during waits were about a
 fifth of the coordinator's cost. On its first poll without `--resume` the watcher prints the

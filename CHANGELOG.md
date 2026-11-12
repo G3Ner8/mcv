@@ -4,6 +4,22 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.8] - 2026-11-12
+
+Fewer coordinator calls per event, from counting them in the fourth real run.
+
+### Changed
+
+- A long question, answer or report reaches the coordinator whole. The Monitor tool cuts a line
+  at about 500 characters, and 15 of 22 questions in that run were longer than 400, so the
+  coordinator read the log again for most of them. The watcher now prints such a text over
+  several lines, each later one marked `…`, cut at characters whatever the locale; past 2600
+  characters it stops and says the rest is in `status.log`.
+- `WAITING` carries what the dialog shows, each line marked `|`, so the coordinator can say
+  what a worker wants approved without reading its screen first (it did for each of 28
+  dialogs). A screen with no dialog on it gives the plain line as before.
+- The README no longer says mcv was never run end to end.
+
 ## [0.2.7] - 2026-11-12
 
 From the fourth run on a real project (33 workers over two days, the coordinator cleared
