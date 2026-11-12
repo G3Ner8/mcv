@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.7"
+  version: "0.2.8"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -236,15 +236,19 @@ answered or pending line, so nothing asked earlier is lost; an answer still pend
 `DELIVER` once the worker has stopped. A question whose `<id> #<n>` you already relayed in this
 conversation is the same question: do not ask the user twice.
 
-The Monitor tool cuts a long event short and ends it with `...(truncated)`. The full line is in
-the task's `status.log` (`$MCV_HOME/<project>/tasks/<id>/status.log`, the `needs-decision` line
-with that id, say): read it there before relaying, and never relay a cut text.
+A long text comes over several lines: each line after the first starts with `…` and goes on
+exactly where the line above stopped, so join them with nothing between (not even a space) and
+you have the whole text; do not read the log for it. Only when a line ends with
+`...(truncated)`, or the last one says `(cut here: ...)`, is the text incomplete: then the full
+line is in the task's `status.log` (`$MCV_HOME/<project>/tasks/<id>/status.log`, the
+`needs-decision` line with that id, say): read it there before relaying, and never relay a cut
+text. Lines that start with `|` under a `WAITING` are the dialog as the worker's screen shows it.
 
 | Event | What to do |
 |---|---|
 | `QUESTION qN · <text>` | Relay it to the user as a question card (below). |
 | `BLOCKED · <text>` | The worker says it cannot continue. Tell the user why and ask what to do. |
-| `WAITING` | The worker stopped at a dialog on its screen. `read` it, describe in plain words what it wants (which command, which file, which question), and ask the user. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
+| `WAITING` | The worker stopped at a dialog on its screen. The lines under the event that start with `|` are that dialog: describe from them, in plain words, what it wants (which command, which file, which question), and ask the user. `read` its screen only when no such lines came or they do not say what is asked. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
 | `RESUMED` | The dialog is gone: the user answered it in the worker's pane. Stop asking them about it; say in one line that the worker went on. |
 | `STOPPED` | The worker's turn ended without a report, or a wait it announced (`waiting` in its log) has lasted past the watcher's limit. This is not "finished". `read` its screen. If it is still waiting on something that is running, say nothing, or one line if the user is waiting on it; if what it waits on has died or hangs, tell the user. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. It does not come for a worker that has reported (a question, `DONE`, `FAILED`, `BLOCKED`) and been sent nothing since: such a turn end, Claude compacting an idle worker say, changes nothing. |
 | `DONE · <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
