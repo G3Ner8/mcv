@@ -4,6 +4,33 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] - 2026-11-12
+
+From the fourth run on a real project (33 workers over two days, the coordinator cleared
+between batches: 20% of the run's cost, against 35% in one long session).
+
+### Fixed
+
+- `STOPPED` came three times in that run, never for a real stop: once for a note a worker sent
+  right after its question, twice when Claude compacted the context of a worker that had been
+  idle for 55 minutes. The watcher now skips it, and does not time a wait, for a worker that
+  owes nothing: its last report (notes and waits aside) is a question, a block, done or failed,
+  and the journal has no prompt sent to it since.
+- After `/clear`, the old conversation's watcher kept the lock for up to 30 minutes, so the new
+  one was refused (three times; one task waited 22 minutes). The lock now names the Claude
+  process its watcher runs under, and a watcher of the same process stops the earlier one and
+  takes over; the earlier one exits 0, so its Monitor reports an end, not a failure. A watcher
+  of another process is refused as before.
+
+### Changed
+
+- The coordinator restarts an expired watcher at once only while a worker is working, at a
+  dialog or in a wait it announced. For a question waiting on the user it waits for its next
+  `spawn` or `prompt`: restarting every 30 minutes while the user was away gave only empty
+  expiries.
+- More work sent to a worker that reported `done` counts against `max_workers`; past the limit
+  the coordinator asks first.
+
 ## [0.2.6] - 2026-11-11
 
 ### Added
