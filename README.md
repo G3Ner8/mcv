@@ -215,7 +215,9 @@ usage.
   local branch; push it first if you need it elsewhere. A branch that never moved from where it
   started, has no upstream and is on no remote held no work, so `remove` deletes it, and the same
   name can be used again. It also works after you have closed the worker's herdr workspace
-  yourself. Before deleting the task's state it copies the task's record to
+  yourself, and for a task whose `spawn` was killed while herdr was still making its worktree:
+  it removes that worktree and the unused branch (`leftover: true`), or you can simply spawn
+  the task again. Before deleting the task's state it copies the task's record to
   `~/.claude/mcv/<project>/history/` (see "What mcv writes").
 - herdr shows each worker's workspace, labelled `⧉ <id> · <project>` (task first, since the
   sidebar cuts long labels, after about 12 characters on herdr 0.9.5, so the coordinator keeps

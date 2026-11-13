@@ -215,10 +215,21 @@ cuts a notification at about 3000 (seven lines of 420 arrived, the eighth was cu
 longer than 400 characters is printed over several lines, each later one marked `  …`, cut by
 jq at characters, not bytes; past 2600 it stops and the last line points to `status.log`. And
 `WAITING` is followed by what the dialog shows, each line marked `  | `: the worker's screen
-(`mcv-herdr.sh read`, 40 lines) below its last full-width rule, without the dashed rules, the
-answer pointer and the key hints, at most 10 lines; nothing when there is no such rule. The
-notification drops the leading spaces, so the marks arrive as `…` and `|`. A `DONE` needs
-nothing more: 36 of 56 were handled in one call.
+(`mcv-herdr.sh read`, 80 lines) below its last full-width rule, without the dashed rules, the
+answer pointer and the key hints; nothing when there is no such rule. The notification drops the
+leading spaces, so the marks arrive as `…` and `|`. A `DONE` needs nothing more: 36 of 56 were
+handled in one call.
+
+Two limits of that design were measured afterwards, on the screens of that run and with a real
+Monitor. A dialog cut to its first 10 lines lost the bottom, which is the part that matters:
+of 15 real dialogs 14 lost an answer line and one the question itself. So a dialog longer than
+12 lines is shown as its first 4 lines and its last 8, with a line between saying how many are
+left out, each line cut at 200 characters, which keeps a dialog inside one notification. And
+the Monitor tool joins lines that come within 200 ms into one notification before it cuts at
+about 3000 characters: of two 1500-character questions asked in one poll, the end of the second
+was lost, with nothing to say so. So the watcher counts what it has printed since the last
+poll, and an event that would take that past 2800 characters waits 0.4 seconds first; the two
+questions then arrived as two notifications, both whole.
 
 `note` and `waiting` lines are never printed: each printed line costs a coordinator turn at its
 full context, and in the second real run notes, restarts and stops during waits were about a
@@ -266,8 +277,16 @@ worker.
   delivered.
 - A worker is refused when it records an answer (`mcv-status --task` with `MCV_TASK` set), and its
   rules forbid it; see Known limits for what that does not stop.
-- Errors are one line; no command leaves a half-made task that `remove` cannot clean up, except
-  SIGKILL in the moment between herdr creating a worktree and meta being written.
+- Errors are one line; no command leaves a half-made task that `remove` cannot clean up. A spawn
+  killed outright (SIGKILL) between asking herdr for the worktree and writing meta used to: herdr
+  finished the worktree and the branch with no task to name them, `remove` said "no task", and
+  spawn refused the branch as taken (measured at seven moments of a spawn; the four after herdr
+  had begun left that). Before the call spawn now writes `tasks/<id>/spawning` (repository,
+  branch, workspace label, whether the branch is its own, the commit it starts at) and deletes
+  it once meta is written. `remove <project>/<id>` on a folder with that file and no meta, and a
+  spawn of the same task again, clear what it names under the task's claim: the workspace by its
+  label, the worktree by its branch, and the branch if it is the spawn's own and still at its
+  starting commit. A leftover worktree with changes is refused.
 
 ## herdr behaviour relied on
 

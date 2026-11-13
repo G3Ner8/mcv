@@ -23,6 +23,9 @@ one_line() { [[ $rc -eq 1 && "$out" == "mcv-herdr: "* && $(printf '%s\n' "$out" 
 
 root="$(mktemp -d)"
 trap 'chmod -R u+rwx "$root" 2>/dev/null; rm -rf "$root"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$root" || exit 1
 mkdir -p "$root/bin"
 ln -s "$HERE/fixtures/fake-herdr.sh" "$root/bin/herdr"
 export PATH="$root/bin:$PATH" HERDR_ENV=1 MCV_HOME="$root/home" FAKE_DIR="$root/fake"

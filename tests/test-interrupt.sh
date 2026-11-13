@@ -22,6 +22,9 @@ expect() { if eval "$2"; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 tmp="$(mktemp -d)"
 root="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$tmp" || exit 1
 mkdir -p "$root/bin" "$root/slow"
 ln -s "$HERE/fixtures/fake-herdr.sh" "$root/bin/herdr"
 # A cp that takes its time, to interrupt a spawn while it copies.
@@ -58,6 +61,54 @@ expect "remove cleans up after a killed spawn" '[[ $rc -eq 0 && $(worktrees) -eq
 sleep 2
 out="$("$H" spawn acme k1 "$repo" feat/k1b 2>&1)"; rc=$?
 expect "the id can be spawned again (the dead spawn's claim is taken over)" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+
+# Killed outright while herdr creates the worktree: herdr finishes it with
+# nobody left to write the task (measured: a branch and a worktree that
+# `remove` did not know, and a branch name spawn then refused). The spawn
+# wrote down what it was about to make, so `remove` clears it.
+wt_of() { git -C "$repo" worktree list --porcelain | awk -v b="branch refs/heads/$1" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}'; }
+kill_in_create() { # <id> <branch>
+  FAKE_SLEEP=1 "$H" spawn acme "$1" "$repo" "$2" >/dev/null 2>&1 &
+  pid=$!
+  wait_for 'grep -q "begin ⧉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
+  kill -9 "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  wait_for 'grep -q "end ⧉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
+  # A claim is taken over only once its dead holder is two seconds old.
+  sleep 2
+}
+kill_in_create c1 feat/c1
+expect "killed during worktree create: herdr still made the branch and the worktree" \
+  'has_branch feat/c1 && [[ -n "$(wt_of feat/c1)" ]]'
+expect "killed during worktree create: no task was written" '[[ ! -f "$MCV_HOME/acme/tasks/c1/meta" ]]'
+out="$("$H" remove acme/c1 2>&1)"; rc=$?
+expect "remove clears what a spawn killed during worktree create left" \
+  '[[ $rc -eq 0 ]] && ! has_branch feat/c1 && [[ -z "$(wt_of feat/c1)" && ! -e "$MCV_HOME/acme/tasks/c1" ]]' "rc=$rc $out"
+expect "that remove leaves no claim or lock" \
+  '[[ ! -e "$MCV_HOME/.claims/acme-c1" && -z "$(ls -A "$MCV_HOME/.locks")" ]]'
+
+# The same id and branch can also simply be spawned again.
+kill_in_create c2 feat/c2
+out="$("$H" spawn acme c2 "$repo" feat/c2 2>&1)"; rc=$?
+expect "spawning the task again clears the leftovers and succeeds" \
+  '[[ $rc -eq 0 && -f "$MCV_HOME/acme/tasks/c2/meta" ]] && has_branch feat/c2' "rc=$rc $out"
+expect "the new task's worktree is the only one on that branch" \
+  '[[ "$(git -C "$repo" worktree list --porcelain | grep -c "^branch refs/heads/feat/c2$")" -eq 1 ]]'
+
+# Leftovers that hold something are not thrown away: a changed worktree is
+# refused, and a branch with a commit of its own is kept.
+kill_in_create c3 feat/c3
+echo stray >"$(wt_of feat/c3)/stray.txt"
+out="$("$H" remove acme/c3 2>&1)"; rc=$?
+expect "leftover worktree with changes: remove refuses" \
+  '[[ $rc -eq 1 && "$out" == *"uncommitted changes"* && -n "$(wt_of feat/c3)" ]]' "rc=$rc $out"
+git -C "$(wt_of feat/c3)" add stray.txt
+git -C "$(wt_of feat/c3)" commit -q -m "stray work"
+out="$("$H" remove acme/c3 2>&1)"; rc=$?
+expect "leftover branch with a commit of its own: worktree removed, branch kept" \
+  '[[ $rc -eq 0 && -z "$(wt_of feat/c3)" ]] && has_branch feat/c3 && [[ "$out" == *"kept"* ]]' "rc=$rc $out"
+out="$("$H" remove acme/c1 2>&1)"; rc=$?
+expect "remove of a task that never was still says so" '[[ $rc -eq 1 && "$out" == *"no task"* ]]' "rc=$rc $out"
 
 # Stopped with TERM while herdr creates the worktree: herdr finishes, the
 # spawn then exits before reading its answer; cleanup still finds and

@@ -17,6 +17,9 @@ expect() { if eval "$2"; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 
 home="$(mktemp -d)"
 trap 'rm -rf "$home"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$home" || exit 1
 log="$home/shop/tasks/t1/status.log"
 
 # Without MCV_TASK: worker kinds refuse, hook outputs stay silent.

@@ -93,6 +93,13 @@
 #       shell; one the user had open stays. Folders left empty (the project's
 #       tasks folder, herdr's folder for the repository) are removed.
 #       Also works after the user has closed the worker's herdr workspace.
+#       A task whose spawn was killed outright while herdr made its worktree
+#       has no meta, only what spawn wrote down first (tasks/<id>/spawning):
+#       remove then clears the worktree, its herdr workspace and, if it is
+#       the spawn's own and still at its starting commit, the branch, and
+#       prints leftover: true. Refused while that worktree has changes, or
+#       while a spawn of the task is running. Spawning the task again clears
+#       the same leftovers first.
 #
 # <project> and <id>: lowercase letters, digits, - and _; <project> starts with
 # a letter; "<project>-<id>" is at most 32 characters (it becomes the herdr
@@ -395,6 +402,65 @@ spawn_cleanup() {
   [[ -z "$CLAIM" ]] || rm -rf "$CLAIM"
 }
 
+# Clear what a spawn killed outright (kill -9, a crash) left when it died
+# between asking herdr for the worktree and writing the task: herdr finishes
+# the worktree and the branch with nobody to record them, `remove` did not
+# know them, and spawn refused the branch name as taken (measured). Before
+# that call spawn writes $1/spawning, naming the repository, the branch, the
+# workspace label, whether the branch is its own, and the commit the branch
+# starts at; this removes what that file names, then the folder. The caller
+# holds the task's claim, so no spawn of it is running.
+#
+# Leftovers that hold something are not thrown away: a worktree with changes
+# is refused, and a branch that is not this spawn's own, or has moved from
+# its starting commit, is kept. Prints "deleted" or "kept" for the branch.
+clear_crashed() {
+  local dir="$1" s root branch owned label base_sha ws p st kept=kept
+  s="$(cat "$dir/spawning" 2>/dev/null || true)"
+  root="$(jfield "$s" .repo)"
+  branch="$(jfield "$s" .branch)"
+  owned="$(jfield "$s" .owned)"
+  label="$(jfield "$s" .label)"
+  base_sha="$(jfield "$s" .base_sha)"
+  if [[ -z "$root" || -z "$branch" || ! -d "$root" ]]; then
+    rm -rf "$dir"
+    printf '%s' "$kept"
+    return 0
+  fi
+  worktree_of() {
+    git -C "$root" worktree list --porcelain 2>/dev/null \
+      | awk -v b="branch refs/heads/$branch" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}'
+  }
+  p="$(worktree_of)"
+  if [[ -n "$p" && -d "$p" ]]; then
+    st="$(git -C "$p" status --porcelain 2>/dev/null)" \
+      || die "refusing: git cannot read the state of $p, which a killed spawn left; check it by hand"
+    [[ -z "$st" ]] \
+      || die "refusing: $p, which a killed spawn left, has uncommitted changes; commit or discard them first"
+  fi
+  lock_repo "$root"
+  if [[ -n "$label" ]]; then
+    ws="$(herdr workspace list 2>/dev/null \
+      | jq -r --arg l "$label" '[.result.workspaces[]? | select(.label == $l)][0].workspace_id // empty' \
+        2>/dev/null || true)"
+    [[ -z "$ws" ]] || herdr worktree remove --workspace "$ws" >/dev/null 2>&1 || true
+  fi
+  p="$(worktree_of)"
+  [[ -z "$p" ]] || git -C "$root" worktree remove --force "$p" >/dev/null 2>&1 \
+    || die "could not remove $p, which a killed spawn left; remove it with git worktree remove"
+  git -C "$root" worktree prune 2>/dev/null || true
+  if [[ "$owned" == true && -n "$base_sha" ]] \
+    && [[ "$(git -C "$root" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null || true)" == "$base_sha" ]] \
+    && git -C "$root" branch -D "$branch" >/dev/null 2>&1; then
+    kept=deleted
+  fi
+  git -C "$root" show-ref --verify --quiet "refs/heads/$branch" || kept=deleted
+  close_repo_workspace "$root" >/dev/null || true
+  unlock_repo
+  rm -rf "$dir"
+  printf '%s' "$kept"
+}
+
 # Copy into worktree $2 the files of main checkout $1 that its
 # .worktreeinclude names (.gitignore syntax), keeping their paths, and print
 # how many. On failure print the reason and return 1.
@@ -627,6 +693,9 @@ cmd_spawn() {
   [[ ! -e "$dir/meta" ]] || die "task $project/$id already exists; pick another id or remove it first"
   # A folder without meta is what a crashed spawn or an old version left (a
   # status log, say); the new task must not inherit its question numbers.
+  # One killed while herdr made its worktree also left that worktree and a
+  # branch, which would make this spawn refuse the name as taken.
+  [[ ! -f "$dir/spawning" ]] || clear_crashed "$dir" >/dev/null
   rm -rf "$dir"
   # Different tasks can join to the same name (a-b/c and a/b-c are both
   # a-b-c), and herdr may already run an agent of that name.
@@ -756,6 +825,16 @@ cmd_spawn() {
   local created ws pane wt linked before opened hbase="$base"
   [[ -z "$reuse" ]] || hbase=""
   before="$(repo_workspaces "$root" false)"
+  # Written before herdr is asked: killed outright while herdr works, this
+  # spawn leaves a worktree and a branch with no task. This file lets
+  # `remove`, or a spawn of the task again, find and clear them. It goes
+  # once the task itself is written.
+  mkdir -p "$dir"
+  NEW_DIR="$dir"
+  jq -cn --arg repo "$root" --arg branch "$branch" --arg label "$label" \
+    --argjson owned "$([[ -n "$owned" ]] && echo true || echo false)" \
+    --arg base_sha "$(git -C "$root" rev-parse -q --verify "${base:-HEAD}^{commit}" 2>/dev/null || true)" \
+    '{repo: $repo, branch: $branch, label: $label, owned: $owned, base_sha: $base_sha}' >"$dir/spawning"
   created="$(h worktree create --cwd "$root" --branch "$branch" ${hbase:+--base "$hbase"} \
     --label "$label" --no-focus)"
   # A main-checkout workspace that was not open before was opened for this
@@ -803,6 +882,7 @@ cmd_spawn() {
     mv "$tmp" "$dir/meta"
   }
   write_meta
+  rm -f "$dir/spawning"
 
   # A worker must never run in the user's own checkout. A separate worktree
   # has its own git dir, distinct from the repository's shared one.
@@ -1006,6 +1086,25 @@ cmd_remove() {
   need_herdr_pane
   [[ $# -eq 1 ]] || die "usage: remove <project>/<id>"
   local dir m wt ws branch repo
+  # A spawn killed while herdr made its worktree wrote no task, only what it
+  # was about to make; that is cleared here. The claim shows no spawn of the
+  # task is still running.
+  local lp="${1%%/*}" li="${1#*/}" left kept
+  left="$MCV_HOME/$lp/tasks/$li"
+  if [[ "$1" == */* && "$lp" =~ $PROJECT_RE && "$li" =~ $ID_RE && ! -f "$left/meta" && -f "$left/spawning" ]]; then
+    JTASK="$1"
+    take_lock "$MCV_HOME/.claims/$lp-$li" 0 \
+      || die "a spawn of $1 is still running; wait for it, or delete $MCV_HOME/.claims/$lp-$li if none is"
+    CLAIM="$MCV_HOME/.claims/$lp-$li"
+    trap 'unlock_repo; [[ -z "$CLAIM" ]] || rm -rf "$CLAIM"' EXIT
+    branch="$(jq -r '.branch // empty' "$left/spawning" 2>/dev/null || true)"
+    kept="$(clear_crashed "$left")" || exit 1
+    rmdir "$(dirname "$left")" 2>/dev/null || true
+    journal "ok: cleared what a spawn killed while creating the worktree left, branch $branch $kept"
+    jq -cn --arg b "$branch" --arg k "$kept" \
+      '{removed: true, leftover: true} + (if $k == "kept" then {branch_kept: $b} else {branch_deleted: $b} end)'
+    return 0
+  fi
   dir="$(task_dir "$1")" || exit 1
   JTASK="$1"
   m="$(cat "$dir/meta")"

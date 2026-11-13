@@ -22,6 +22,9 @@ tmp="$(mktemp -d)"
 root="$(cd "$tmp" && pwd -P)/My Projects"
 mkdir -p "$root/bin"
 trap 'rm -rf "$tmp"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$tmp" || exit 1
 ln -s "$HERE/fixtures/fake-herdr.sh" "$root/bin/herdr"
 export PATH="$root/bin:$PATH" HERDR_ENV=1 MCV_HOME="$root/mcv home" FAKE_DIR="$root/fake dir"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \

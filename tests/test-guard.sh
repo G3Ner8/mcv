@@ -20,6 +20,9 @@ expect() { if eval "$2"; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$root" || exit 1
 export MCV_HOME="$root/home" GIT_CONFIG_GLOBAL=/dev/null
 mkdir -p "$MCV_HOME/acme/tasks/t1"
 echo '{"branch":"fix/cart"}' >"$MCV_HOME/acme/tasks/t1/meta"
@@ -138,6 +141,51 @@ denies 'git switch -C develop'
 allows 'git branch -dr origin/old'
 allows 'git update-ref refs/heads/fix/cart HEAD'
 allows 'git checkout -B fix/cart origin/fix/cart'
+
+# Short options written together: the letter that matters is found among
+# the others (a sampled mutation run changed these checks and nothing here
+# noticed).
+denies 'git tag -af v1.0 -m "again"'
+denies 'git tag -fa v1.0'
+denies 'git tag -ad v1.0'
+allows 'git tag -a v2.0 -m "release"'
+allows 'git tag -l'
+denies 'git branch -vf main HEAD'
+denies 'git branch -fv develop origin/develop'
+denies 'git branch -qD main'
+denies 'git branch -qm fix/other'
+allows 'git branch -vv'
+allows 'git branch -qf fix/cart HEAD'
+denies 'git push -ud origin main'
+denies 'git push -qd origin main'
+denies 'git push -uq origin main'
+allows 'git push -uq origin fix/cart'
+allows 'git push -qd origin fix/cart'
+r="$(decide 'git push -qd origin main')"
+expect "a delete among short options is called a delete" '[[ "$r" == *"deletes main"* ]]' "$r"
+# The folder comes from the hook's input; without one, the hook's own.
+r="$(jq -cn '{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git push"}}' \
+  | (cd "$root/other" && MCV_TASK=acme/t1 "$S" --guard-git 2>&1))"
+expect "no cwd in the input: the push is judged from the hook's own folder" '[[ "$r" == *"deny"*"main"* ]]' "$r"
+
+# What the guard does not see, written down so that a change to it is a
+# decision. It reads the command's words and catches a slip, not a worker
+# set on getting round it. None of these forms was used in 3755 Bash calls
+# of 60 real workers (88 pushes), so they are recorded here, not chased.
+allows 'if npm test; then git push origin main; fi'
+allows 'for r in a b; do git push origin main; done'
+allows 'timeout 60 git push origin main'
+allows 'time git push origin main'
+allows 'xargs git push origin main'
+allows 'bash -c "git push origin main"'
+allows $'git push \\\n  origin main'
+# Not written in the command, so refused rather than guessed.
+denies 'git push origin "$(git branch --show-current)"'
+denies 'git push -u origin "$BRANCH"'
+# Commands that reach other worktrees without naming a branch are outside
+# it too: the stash is one list for the whole repository.
+allows 'git stash drop'
+allows 'git worktree remove --force ../other'
 
 # The reason names the worker's branch and how to ask instead.
 r="$(decide 'git push origin main')"

@@ -16,6 +16,11 @@ else
   files=(test-*.sh)
 fi
 
+# The refs of the checkout the tests sit in, before and after: no test may
+# commit, branch, tag or stash there (test-isolation.sh says how it happened).
+refs() { git -C "$HERE/.." for-each-ref 2>/dev/null || true; }
+refs_before="$(refs)"
+
 failed=()
 for t in "${files[@]}"; do
   if out="$(bash "$t" 2>&1)"; then
@@ -26,6 +31,12 @@ for t in "${files[@]}"; do
     failed+=("$t")
   fi
 done
+
+if [[ "$(refs)" != "$refs_before" ]]; then
+  printf '\nFAIL  the tests changed this checkout'"'"'s refs:\n'
+  diff <(printf '%s\n' "$refs_before") <(refs) | sed 's/^/      /'
+  exit 1
+fi
 
 if (( ${#failed[@]} )); then
   printf '\n%d of %d files failed: %s\n' "${#failed[@]}" "${#files[@]}" "${failed[*]}"

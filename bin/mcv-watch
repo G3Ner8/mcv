@@ -27,7 +27,9 @@
 #   ⧉ <id> · WAITING · ...             it stopped at an approval or question dialog in its pane;
 #                                      what the dialog shows follows, one line each
 #                                      marked "  | " (the screen below its last full
-#                                      rule; at most 10 lines), when it can be read
+#                                      rule), when it can be read; of a dialog longer
+#                                      than 12 lines, the first 4 and the last 8, with
+#                                      a line between saying how many are left out
 #   ⧉ <id> · RESUMED · ...             it left that dialog and is working again
 #   ⧉ <id> · STOPPED · ...             its turn ended with no report (see below), or a wait
 #                                      it announced has lasted past the limit: read its screen
@@ -41,7 +43,10 @@
 # marked "  …" and going on where the line above stopped (the Monitor tool
 # cuts a line at about 500 characters and a notification at about 3000);
 # past 2600 characters it stops and the last line says the rest is in the
-# task's status.log.
+# task's status.log. The Monitor tool also joins lines that come within
+# 200 ms into one notification: an event that would take the lines printed
+# since the last poll past 2800 characters is held back 0.4 seconds, so it
+# starts a notification of its own.
 # MCV_WATCH_RAW=1 prints the same events tab-separated instead, for scripts
 # and tests: "<time> <project>/<id> <kind> <qid|-> <text>", where kind is a
 # log kind, "deliver", "gone", or "state" with blocked, working or done (a
@@ -145,9 +150,24 @@ emit() {
     needs-decision) label="QUESTION $f4"; text="$f5" ;;
     *)              label="$(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]')"; text="$f5" ;;
   esac
-  say_event "⧉ ${task#*/} · $label" "$text"
-  [[ -z "$dialog" ]] || printf '%s\n' "$dialog"
+  local out
+  out="$(say_event "⧉ ${task#*/} · $label" "$text"; [[ -z "$dialog" ]] || printf '%s\n' "$dialog")"
+  # The Monitor tool joins lines that come within 200 ms into one
+  # notification and cuts that at about 3000 characters, saying nothing
+  # (measured: of two 1500-character questions in one poll, the end of the
+  # second was lost). An event that would not fit with those already printed
+  # in this burst waits long enough to start a notification of its own.
+  if (( BURST > 0 && BURST + ${#out} + 1 > BURST_MAX )); then
+    sleep 0.4
+    BURST=0
+  fi
+  printf '%s\n' "$out"
+  BURST=$((BURST + ${#out} + 1))
 }
+# Characters printed since the last pause between polls (bytes under a C
+# locale, which only makes a burst end sooner).
+BURST=0
+BURST_MAX=2800
 
 # Print a header and its text. The Monitor tool cuts a line at about 500
 # characters and a notification at about 3000 (measured), and a cut
@@ -179,11 +199,12 @@ say_event() {
 # full-width rule at the bottom of the screen: the lines after the last
 # such rule are taken as they are, without the dashed rules inside it, the
 # pointer in front of the first answer and the key hints. Nothing when the
-# screen cannot be read or has no such rule; at most 10 lines of 300.
+# screen cannot be read or has no such rule. The last 80 lines of the
+# screen are read, so a tall dialog still has its rule in them.
 dialog_of() {
-  local screen l bare found=0 n=0
+  local screen l bare found=0
   local -a shown=()
-  screen="$("$HERDR" read "$1" 40 2>/dev/null)" || return 0
+  screen="$("$HERDR" read "$1" 80 2>/dev/null)" || return 0
   while IFS= read -r l; do
     bare="${l//─/}"
     bare="${bare//[[:space:]]/}"
@@ -205,12 +226,26 @@ dialog_of() {
     shown+=("$l")
   done <<<"$screen"
   (( found )) || return 0
+  # A long dialog keeps both ends: the top says what it is about, the
+  # bottom why it asks, the question and the answers on offer (measured on
+  # 15 real dialogs: cut from the top only, 14 lost an answer line and one
+  # the question). 12 lines of at most 200 characters and the line that
+  # says what is left out stay inside one notification.
+  local total=${#shown[@]} i=0
   for l in ${shown[@]+"${shown[@]}"}; do
-    (( n < 10 )) || break
-    n=$((n + 1))
-    printf '  | %s\n' "${l:0:300}"
+    i=$((i + 1))
+    if (( total > DIALOG_TOP + DIALOG_END )); then
+      if (( i == DIALOG_TOP + 1 )); then
+        printf '  | (%s lines of the dialog are not shown here: read its screen for them)\n' \
+          "$((total - DIALOG_TOP - DIALOG_END))"
+      fi
+      (( i <= DIALOG_TOP || i > total - DIALOG_END )) || continue
+    fi
+    printf '  | %s\n' "${l:0:200}"
   done
 }
+DIALOG_TOP=4
+DIALOG_END=8
 
 # True when the worker of task $2 (log $1) has said its piece and been sent
 # nothing since: its last report, notes and waits aside, is a question, a
@@ -575,4 +610,7 @@ while true; do
   # commands, so a foreground sleep held a stop signal for up to INTERVAL.
   sleep "$INTERVAL" &
   wait $! || true
+  # That pause ended the burst of lines, unless it is shorter than the
+  # Monitor tool's 200 ms (an interval set for a test, say).
+  [[ "$INTERVAL" =~ ^0*\.[0-3] ]] || BURST=0
 done

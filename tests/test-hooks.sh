@@ -21,6 +21,9 @@ expect() { if eval "$2"; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 
 home="$(mktemp -d)"
 trap 'rm -rf "$home"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$home" || exit 1
 
 expect "hooks.json exists and parses" 'jq -e . "$HOOKS" >/dev/null 2>&1'
 expect "only SessionStart and PreToolUse hooks" \
