@@ -70,6 +70,11 @@ badly, and the runner is kept light on purpose.
 - Tests use `tests/fixtures/fake-herdr.sh`, which does the git work for real, so git behaves as it
   does under herdr. Never call the real herdr from a test, and never touch `~/.claude/mcv`: point
   `MCV_HOME` at a temporary folder.
+- A test file changes into its temporary folder before anything else. A git command given an empty
+  path (`git -C "$wt"` after a spawn that failed) runs in the current folder, and three empty
+  commits reached this repository that way. `tests/test-isolation.sh` runs every test file from
+  inside a scratch repository against a broken spawn, and `tests/run.sh` fails when the refs of
+  this checkout change during a run.
 - A behaviour that only real herdr or a real Claude worker can show (a dialog, a signal, what a
   worker sees) is checked by hand; say in the pull request what you ran and what it showed.
 

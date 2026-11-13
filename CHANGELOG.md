@@ -4,6 +4,43 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.9] - 2026-11-13
+
+From testing mcv against its own claims: probes with a real Monitor, the screens of a real run,
+a spawn killed at seven moments, and a sampled mutation run.
+
+### Fixed
+
+- Two long questions in one poll: the end of the second was lost, with nothing to say so. The
+  Monitor tool joins lines that come within 200 ms into one notification and cuts it at about
+  3000 characters. The watcher now holds back an event that would take what it printed since
+  the last poll past 2800 characters, so it starts a notification of its own (measured: two
+  1500-character questions arrived as two notifications, both whole).
+- A long dialog lost its bottom, the part that says why it asks and which answers it offers: of
+  15 real dialogs cut to their first 10 lines, 14 lost an answer line and one the question.
+  `WAITING` now carries the first 4 lines and the last 8 of a dialog longer than 12, with a
+  line between saying how many are left out, and reads 80 lines of the screen, not 40.
+- A `spawn` killed outright while herdr made its worktree left a worktree and a branch that
+  `remove` did not know ("no task") and that made spawn refuse the branch name. Spawn now
+  writes down what it is about to make before asking herdr; `remove` clears such leftovers
+  (`leftover: true`), and so does spawning the task again. A leftover worktree with changes is
+  refused, and a branch that has a commit of its own is kept.
+
+### Changed
+
+- The test suite cannot write to the checkout it is run from. A failed spawn left a worktree
+  path empty, `git -C ""` ran in the current folder, and three empty commits by the test author
+  reached this repository, one of them under the 0.2.6 tag. Every test file now works from its
+  temporary folder; `tests/test-isolation.sh` runs each of them from inside a scratch
+  repository against a broken spawn, and `tests/run.sh` fails when this checkout's refs change
+  during a run.
+- Two watcher tests waited a fixed time for a lock to change hands and failed on a busy machine
+  (9 seconds measured, against the 7 allowed); they wait for the lock itself.
+- The git guard's tests cover short options written together (`-af`, `-vf`, `-ud`), which a
+  mutation run showed nothing checked, and record the forms the guard does not see (`if ...;
+  then git push`, `timeout`, `bash -c`, a line continuation): none was used in 3755 Bash calls
+  of 60 real workers.
+
 ## [0.2.8] - 2026-11-12
 
 Fewer coordinator calls per event, from counting them in the fourth real run.

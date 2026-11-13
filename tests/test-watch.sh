@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Tests for bin/mcv-watch, one poll at a time (--once) against a stub herdr.
-# Needs bash and jq; no herdr.
+# Needs bash, jq and perl (to time when lines arrive); no herdr.
 # Run: tests/test-watch.sh   (exit 0 when every check passes)
 
 set -uo pipefail
@@ -18,6 +18,9 @@ expect() { if eval "$2"; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$root" || exit 1
 export MCV_HOME="$root/home" MCV_HERDR="$HERE/fixtures/stub-herdr.sh" STUB_AGENTS="$root/agents"
 export MCV_WATCH_STATE="$root/state"
 # No Claude process to belong to, unless a check says so: run from a Claude
@@ -483,7 +486,13 @@ mkdir -p "$MCV_HOME/acme/watch.lock" "$MCV_HOME/acme/watch.lock.takeover"
 echo "$dead" >"$MCV_HOME/acme/watch.lock/pid"
 MCV_WATCH_INTERVAL=30 env -u MCV_WATCH_STATE "$W" acme >/dev/null 2>&1 &
 wpid=$!
-sleep 7
+# The watcher clears it after 5 seconds of its own waits, which take longer
+# on a busy machine (measured: 9 seconds beside two working sessions).
+i=0
+while (( i < 60 )) && [[ "$(cat "$MCV_HOME/acme/watch.lock/pid" 2>/dev/null)" != "$wpid" ]]; do
+  sleep 0.5
+  i=$((i + 1))
+done
 expect "a leftover takeover lock is cleared and the stale lock taken over" \
   'kill -0 "$wpid" 2>/dev/null && [[ "$(cat "$MCV_HOME/acme/watch.lock/pid")" == "$wpid" ]]'
 kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
@@ -638,7 +647,13 @@ agents "w:p11,done,1,acme-r"
 say r needs-decision "open question?"
 runw() { # <output file> [--resume]
   MCV_WATCH_INTERVAL=0.2 env -u MCV_WATCH_STATE "$W" acme ${2:+"$2"} >"$1" 2>/dev/null &
-  local p=$!
+  local p=$! i=0
+  # A second from when it holds the lock, not from when it was started: on
+  # a busy machine starting alone can take that long.
+  while (( i < 50 )) && [[ "$(cat "$MCV_HOME/acme/watch.lock/pid" 2>/dev/null)" != "$p" ]]; do
+    sleep 0.2
+    i=$((i + 1))
+  done
   sleep 1
   kill -TERM "$p"; wait "$p" 2>/dev/null
 }
@@ -772,6 +787,82 @@ agents "w:p20,blocked,6,acme-x"
 out="$(poll)"
 expect "a screen that cannot be read: the plain line" \
   '[[ "$out" == "⧉ x · WAITING · a dialog is open in its pane" ]]' "$out"
+
+# A long dialog keeps both ends: what it is about at the top, and at the
+# bottom why it asks, the question and the answers on offer. Cut from the
+# top only, 14 of 15 real dialogs lost an answer line and one lost the
+# question (measured on screens of a real run).
+agents "w:p20,working,7,acme-x"
+poll >/dev/null
+{
+  printf '⏺ Bash(node check.js)\n\n'
+  printf '────────────────────────────────────────────────────────────────────────\n'
+  printf ' Bash command\n Check the saved session of each shop\n'
+  printf '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n'
+  printf ' │ node - <<EOF\n'
+  for i in $(seq 1 30); do printf ' │   step(%s);\n' "$i"; done
+  printf ' │ EOF\n'
+  printf '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n'
+  printf ' Dangerous rm operation not ruled out\n /permissions to let auto mode decide\n\n'
+  printf ' Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and do not ask again for node commands in /work/tree\n   3. No\n\n'
+  printf ' Esc to cancel · Tab to amend\n'
+} >"$screen"
+agents "w:p20,blocked,8,acme-x"
+out="$(STUB_SCREEN="$screen" poll)"
+expect "a long dialog keeps its top" \
+  'grep -qxF "  | Bash command" <<<"$out" && grep -qxF "  | Check the saved session of each shop" <<<"$out"' "$out"
+expect "and its bottom: the reason, the question and every answer" \
+  'grep -qxF "  | Dangerous rm operation not ruled out" <<<"$out" && grep -qxF "  | Do you want to proceed?" <<<"$out" \
+   && grep -qxF "  | 1. Yes" <<<"$out" && grep -qxF "  | 3. No" <<<"$out" \
+   && grep -qF "  | 2. Yes, and do not ask again" <<<"$out"' "$out"
+expect "the middle is left out, and one line says how much" \
+  '[[ $(grep -c "^  | " <<<"$out") -le 13 ]] && grep -qE "^  \| \(2[0-9] lines of the dialog are not shown" <<<"$out" \
+   && ! grep -qF "step(15)" <<<"$out"' "$out"
+# A line wider than the pane's usual width is cut, so that a dialog never
+# passes one notification by itself.
+agents "w:p20,working,9,acme-x"
+poll >/dev/null
+{
+  printf '────────────────────────────────────────────────────────────────────────\n Bash command\n'
+  for i in $(seq 1 30); do printf ' %s\n' "$(printf 'x%.0s' $(seq 1 400))"; done
+  printf ' Do you want to proceed?\n ❯ 1. Yes\n   2. No\n'
+} >"$screen"
+agents "w:p20,blocked,10,acme-x"
+out="$(STUB_SCREEN="$screen" poll)"
+expect "a dialog of very wide lines still fits one notification" \
+  '[[ $(jq -Rs length <<<"$out") -le 2800 ]] && grep -qxF "  | 2. No" <<<"$out"' "chars=$(jq -Rs length <<<"$out")"
+
+# The Monitor tool joins lines printed within 200 ms into one notification
+# and cuts it at about 3000 characters (measured: of two 1500-character
+# questions in one poll, the end of the second was lost, with nothing to
+# say so). Events that would not fit together are printed apart.
+rm -rf "$MCV_HOME/acme/tasks" "$MCV_WATCH_STATE"/acme
+task x w:p20; task y w:p21; task z w:p22
+agents "w:p20,working,1,acme-x|w:p21,working,1,acme-y|w:p22,working,1,acme-z"
+poll >/dev/null
+numbered() { local i s=""; for i in $(seq 1 300); do s="$s$1$(printf '%03d' "$i") "; done; printf '%sEND-%s' "$s" "$1"; }
+say x needs-decision "$(numbered A)"
+say y needs-decision "$(numbered B)"
+say z needs-decision "Short one?"
+# Each line with the time it arrived; a burst is a run of lines less than
+# 200 ms apart, as the Monitor tool groups them.
+out="$(poll | perl -MTime::HiRes=time -e '$| = 1; while (<STDIN>) { printf "%.3f\t%s", time, $_ }')"
+bursts="$(awk -F'\t' 'NR > 1 && $1 - prev > 0.2 { n++ } { len[n + 0] += length($2) + 1; prev = $1 }
+  END { for (i = 0; i <= n; i++) printf "%s ", len[i] }' <<<"$out")"
+expect "two long questions in one poll come as separate bursts" \
+  '[[ $(wc -w <<<"$bursts") -ge 2 ]]' "bursts: $bursts"
+expect "no burst passes 2800 characters" \
+  '! tr " " "\n" <<<"$bursts" | awk "\$1 > 2800 { bad = 1 } END { exit !bad }"' "bursts: $bursts"
+expect "and nothing of any question is lost" \
+  'grep -q "END-A" <<<"$out" && grep -q "END-B" <<<"$out" && grep -q "Short one?" <<<"$out"' "$out"
+# Short events of one poll still come together: no wait between them.
+say x note "nothing"
+say x needs-decision "One?"
+say y needs-decision "Two?"
+out="$(poll | perl -MTime::HiRes=time -e '$| = 1; while (<STDIN>) { printf "%.3f\t%s", time, $_ }')"
+bursts="$(awk -F'\t' 'NR > 1 && $1 - prev > 0.2 { n++ } { len[n + 0] += length($2) + 1; prev = $1 }
+  END { for (i = 0; i <= n; i++) printf "%s ", len[i] }' <<<"$out")"
+expect "short events of one poll come in one burst" '[[ $(wc -w <<<"$bursts") -eq 1 ]]' "bursts: $bursts"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

@@ -18,6 +18,9 @@ expect() { if eval "$2"; then ok "$1"; else bad "$1" "${3:-}"; fi; }
 
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
+# Work from the temporary folder: a git command given an empty path runs in
+# the current folder, which must never be the checkout this was started from.
+cd "$root" || exit 1
 mkdir -p "$root/bin"
 ln -s "$HERE/fixtures/fake-herdr.sh" "$root/bin/herdr"
 export PATH="$root/bin:$PATH" HERDR_ENV=1 MCV_HOME="$root/home" FAKE_DIR="$root/fake"
