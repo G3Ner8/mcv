@@ -15,6 +15,12 @@
 # Quote the text; several words given without quotes are joined with spaces.
 # Empty text is refused (exit 2), as is an empty answer.
 #
+# An answer or an order that is sent is recorded by the command that sends
+# it, `mcv-herdr.sh prompt ... --answers <id>` or `--order`, which calls the
+# lines below itself: only it knows whether the text went in. They are run
+# by hand only when nothing is sent (the user answered in the worker's pane,
+# or dropped the answer).
+#
 # The coordinator records an answer, which closes the question:
 #   mcv-status --task <project>/<id> answered <question-id> <text>
 # or, when the worker was still busy and the answer could not be sent yet,
@@ -30,6 +36,10 @@
 # recorded, after the correction is sent, as
 #   mcv-status --task <project>/<id> amended <question-id> <text>
 # which needs an answered line first and may be repeated.
+# Whether an id can still take an answer (asked or queued, not answered yet)
+# is asked with
+#   mcv-status --task <project>/<id> open <question-id|order-id>
+# which writes nothing: exit 0 when it can, 1 with the reason when not.
 # (all three refused when MCV_TASK is set: a worker never closes its own questions)
 #
 # The coordinator adds a line to the project's journal, next to the ones
@@ -501,9 +511,12 @@ case "${1:-}" in
     ;;
 
   --task)
-    [[ $# -ge 5 && ( "$3" == answered || "$3" == pending || "$3" == amended ) ]] \
-      || usage "usage: --task <project>/<id> answered|pending|amended <question-id|order-id> <text>, or pending - <text>"
-    has_text "${*:5}" || usage "the answer is empty; record what the user said"
+    # open asks, and writes nothing: can this id still take an answer?
+    asks=""
+    [[ $# -eq 4 && "$3" == open ]] && asks=1
+    [[ -n "$asks" ]] || [[ $# -ge 5 && ( "$3" == answered || "$3" == pending || "$3" == amended ) ]] \
+      || usage "usage: --task <project>/<id> answered|pending|amended <question-id|order-id> <text>, or pending - <text>, or open <question-id|order-id>"
+    [[ -n "$asks" ]] || has_text "${*:5}" || usage "the answer is empty; record what the user said"
     # Only the coordinator records answers; a worker closing its own question
     # would hide it from the user.
     [[ -z "${MCV_TASK:-}" ]] || die "a worker cannot record answers; only the coordinator does"
@@ -537,6 +550,7 @@ case "${1:-}" in
       ! cut -f2,3 "$log" | grep -qxF "answered"$'\t'"$qid" \
         || die "question $qid in task $2 is already answered; a correction is amended"
     fi
+    [[ -z "$asks" ]] || exit 0
     append "$log" "$3" "$qid" "${*:5}"
     ;;
 

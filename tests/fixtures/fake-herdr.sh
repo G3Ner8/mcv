@@ -124,8 +124,8 @@ case "${1:-} ${2:-}" in
     printf '{"result":{"workspace":{"workspace_id":"%s","pane_count":%s}}}\n' "$3" "${FAKE_MAIN_PANES:-1}"
     ;;
   "workspace close")
-    [[ -f "$D/main/$3" ]] || fail workspace_not_found "workspace $3 not found"
-    rm -f "$D/main/$3"
+    [[ -f "$D/main/$3" || -f "$D/ws/$3" ]] || fail workspace_not_found "workspace $3 not found"
+    rm -f "$D/main/$3" "$D/ws/$3"
     echo '{"result":{}}'
     ;;
   "pane list")
@@ -143,7 +143,12 @@ case "${1:-} ${2:-}" in
     ws="$4"
     [[ -f "$D/ws/$ws" ]] || fail workspace_not_found "workspace $ws not found"
     IFS=$'\t' read -r repo wt _ <"$D/ws/$ws"
-    git -C "$repo" worktree remove --force "$wt"
+    # When git fails, herdr answers with git's own words and keeps the
+    # workspace (measured with herdr 0.9.5: "failed to delete ... Directory
+    # not empty", then "is not a working tree" on the next try).
+    if ! err="$(git -C "$repo" worktree remove --force "$wt" 2>&1)"; then
+      fail worktree_remove_failed "$(printf '%s' "$err" | head -1)"
+    fi
     rm -f "$D/ws/$ws"
     echo '{"result":{}}'
     ;;

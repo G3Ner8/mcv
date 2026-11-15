@@ -2,7 +2,8 @@
 #
 # Tests for the task lifecycle in mcv-herdr.sh (task names, spawn's starting
 # marker, prompt to a worker whose Claude has exited, remove after the user
-# closed the workspace), against tests/fixtures/fake-herdr.sh. Needs bash,
+# closed the workspace and after it stopped half way, prompt recording an
+# answer or an order), against tests/fixtures/fake-herdr.sh. Needs bash,
 # git and jq; no herdr.
 # Run: tests/test-lifecycle.sh   (exit 0 when every check passes)
 
@@ -289,6 +290,152 @@ export FAKE_DIR="$root/fake6"
 out="$(FAKE_MAIN_OPEN="$repo" "$H" spawn solo w7 "$repo" fix/w7 2>&1)"
 out="$("$H" remove solo/w7 2>&1)"
 expect "the user's own repository workspace is never closed" '[[ -n "$(mainws)" ]]' "$out"
+
+# remove can be run again after it stopped half way, and ends in the same
+# place. Seen twice in real runs: a dev server left running in the worktree
+# kept writing an ignored folder, so git took the worktree out of its list
+# but could not delete the folder; the next remove refused the folder as
+# unreadable, and once the folder was deleted by hand herdr refused it as
+# "not a working tree". The task could then only be cleared by hand.
+export FAKE_DIR="$root/fake7"
+echo .vite >>"$repo/.git/info/exclude"
+gone() { # <project> <id> <worktree> <workspace>: nothing of the task is left
+  [[ ! -e "$3" && ! -e "$MCV_HOME/$1/tasks/$2" && ! -e "$FAKE_DIR/ws/$4" ]] \
+    && ! git -C "$repo" worktree list | grep -qF "$3" \
+    && compgen -G "$MCV_HOME/$1/history/$2-*" >/dev/null
+}
+
+# What the first failed remove left: git no longer lists the worktree, its
+# folder holds only what the server wrote, herdr still has the workspace.
+"$H" spawn live v1 "$repo" fix/v1 >/dev/null 2>&1
+wt="$(jq -r .worktree "$(meta live v1)")"
+ws="$(jq -r .workspace_id "$(meta live v1)")"
+git -C "$repo" worktree remove --force "$wt"
+mkdir -p "$wt/.vite"
+echo x >"$wt/.vite/deps.json"
+out="$("$H" remove live/v1 2>&1)"; rc=$?
+expect "remove finishes when git already dropped the worktree and a folder is left" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+expect "nothing of that task is left: folder, workspace, task state; its record is kept" 'gone live v1 "$wt" "$ws"' \
+  "$(ls -A "$wt" "$FAKE_DIR/ws" "$MCV_HOME/live" 2>&1 | tr '\n' ' ')"
+
+# The same with the folder already deleted by hand.
+"$H" spawn live v2 "$repo" fix/v2 >/dev/null 2>&1
+wt="$(jq -r .worktree "$(meta live v2)")"
+ws="$(jq -r .workspace_id "$(meta live v2)")"
+git -C "$repo" worktree remove --force "$wt"
+out="$("$H" remove live/v2 2>&1)"; rc=$?
+expect "remove finishes when the worktree is gone and herdr still has its workspace" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+expect "nothing of that task is left either" 'gone live v2 "$wt" "$ws"' \
+  "$(ls -A "$FAKE_DIR/ws" "$MCV_HOME/live" 2>&1 | tr '\n' ' ')"
+
+# Something still writing into the worktree: remove says so and keeps the
+# task; once the writer has stopped, the same command finishes.
+"$H" spawn live v3 "$repo" fix/v3 >/dev/null 2>&1
+wt="$(jq -r .worktree "$(meta live v3)")"
+ws="$(jq -r .workspace_id "$(meta live v3)")"
+(
+  while [[ ! -e "$root/stop-writer" ]]; do
+    mkdir -p "$wt/.vite" 2>/dev/null
+    echo x >"$wt/.vite/deps.json"
+  done
+) 2>/dev/null &
+writer=$!
+sleep 0.3
+out="$("$H" remove live/v3 2>&1)"; rc=$?
+expect "remove while something writes into the worktree is refused, naming that" \
+  '[[ $rc -eq 1 && "$out" == *"still writes"* && "$out" == *"$wt"* ]]' "rc=$rc $out"
+expect "the task is kept for the next remove" '[[ -f "$(meta live v3)" ]]'
+touch "$root/stop-writer"
+wait "$writer" 2>/dev/null
+out="$("$H" remove live/v3 2>&1)"; rc=$?
+expect "once the writer stopped, the same remove finishes" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+expect "nothing of that task is left" 'gone live v3 "$wt" "$ws"' \
+  "$(ls -A "$wt" "$FAKE_DIR/ws" "$MCV_HOME/live" 2>&1 | tr '\n' ' ')"
+
+# A worktree git still lists but cannot read is not thrown away.
+"$H" spawn live v4 "$repo" fix/v4 >/dev/null 2>&1
+wt="$(jq -r .worktree "$(meta live v4)")"
+mv "$wt/.git" "$wt/.git-moved"
+out="$("$H" remove live/v4 2>&1)"; rc=$?
+expect "remove refuses a worktree git lists but cannot read" \
+  '[[ $rc -eq 1 && "$out" == *"cannot read"* && -d "$wt" && -f "$(meta live v4)" ]]' "rc=$rc $out"
+mv "$wt/.git-moved" "$wt/.git"
+"$H" remove live/v4 >/dev/null 2>&1
+
+# prompt records what it did with an answer or an order, since it alone
+# knows whether the text went in. Seen in a real run: the send and the
+# record were two commands joined with ";", the send was refused (worker
+# busy), the question was recorded as answered all the same, and the
+# answer could then not even be kept as pending.
+export FAKE_DIR="$root/fake8"
+ST="$(dirname "$H")/mcv-status"
+"$H" spawn ans a1 "$repo" fix/a1 >/dev/null 2>&1
+log="$MCV_HOME/ans/tasks/a1/status.log"
+kinds() { cut -f2,3 "$log" | tr '\t' ' ' | tr '\n' ',' ; }
+MCV_TASK=ans/a1 "$ST" needs-decision "Per drink or per order?" >/dev/null
+MCV_TASK=ans/a1 "$ST" needs-decision "Oat or soy?" >/dev/null
+
+out="$("$H" prompt ans/a1 "Answer to a1 #1: b: once per order" --answers q1 --no-wait 2>&1)"; rc=$?
+expect "prompt --answers to a stopped worker sends and says it is answered" \
+  '[[ $rc -eq 0 && "$(jq -r .answered <<<"$out" 2>/dev/null)" == q1 && "$(jq -r .state <<<"$out")" == working ]]' "rc=$rc $out"
+line="$(awk -F'\t' '$2 == "answered" && $3 == "q1" { print $4 }' "$log")"
+expect "the log holds the answer as it was sent" '[[ "$line" == "Answer to a1 #1: b: once per order" ]]' "$(cat "$log")"
+
+out="$(FAKE_AGENT_STATE=working "$H" prompt ans/a1 "Answer to a1 #2: a: oat" --answers q2 --no-wait 2>&1)"; rc=$?
+expect "prompt --answers to a busy worker keeps the answer and says it is queued" \
+  '[[ $rc -eq 0 && "$(jq -r .queued <<<"$out" 2>/dev/null)" == q2 && "$(jq -r .state <<<"$out")" == working ]]' "rc=$rc $out"
+expect "the question is pending, not answered" \
+  '[[ "$(kinds)" == *"pending q2,"* && "$(kinds)" != *"answered q2"* ]]' "$(kinds)"
+expect "nothing was sent to the busy worker" '! grep -qF "oat" "$FAKE_DIR/calls"' "$(tail -3 "$FAKE_DIR/calls")"
+out="$(FAKE_AGENT_STATE=blocked "$H" prompt ans/a1 "Answer to a1 #2: a: oat" --answers q2 --no-wait 2>&1)"; rc=$?
+expect "a worker at a dialog is busy too" '[[ $rc -eq 0 && "$(jq -r .queued <<<"$out" 2>/dev/null)" == q2 ]]' "rc=$rc $out"
+out="$("$H" prompt ans/a1 "Answer to a1 #2: a: oat" --answers q2 --no-wait 2>&1)"; rc=$?
+expect "the kept answer, sent once the worker stopped, is answered" \
+  '[[ $rc -eq 0 && "$(jq -r .answered <<<"$out" 2>/dev/null)" == q2 && "$(kinds)" == *"answered q2,"* ]]' "rc=$rc $out"
+
+calls="$(wc -l <"$FAKE_DIR/calls")"
+out="$("$H" prompt ans/a1 "again" --answers q1 --no-wait 2>&1)"; rc=$?
+expect "an answer to a question already answered is refused" '[[ $rc -eq 1 && "$out" == *"already answered"* ]]' "rc=$rc $out"
+out="$("$H" prompt ans/a1 "what" --answers q9 --no-wait 2>&1)"; rc=$?
+expect "an answer to a question that was never asked is refused" '[[ $rc -eq 1 && "$out" == *"no question q9"* ]]' "rc=$rc $out"
+expect "neither refusal sent anything" '! grep -qE "agent prompt .*(again|what)" "$FAKE_DIR/calls"' "$(tail -3 "$FAKE_DIR/calls")"
+out="$("$H" prompt ans/a1 "x" --answers 1 --no-wait 2>&1)"; rc=$?
+expect "--answers needs a question or an order id" '[[ $rc -eq 1 && "$out" == *"--answers"* ]]' "rc=$rc $out"
+out="$("$H" prompt ans/a1 "x" --answers q1 --order 2>&1)"; rc=$?
+expect "--answers and --order together are refused" '[[ $rc -eq 1 ]]' "rc=$rc $out"
+
+# A send that fails for another reason records nothing.
+MCV_TASK=ans/a1 "$ST" needs-decision "Third?" >/dev/null
+out="$(FAKE_FAIL=notready "$H" prompt ans/a1 "Answer to a1 #3: yes" --answers q3 --no-wait 2>&1)"; rc=$?
+expect "a send to a worker whose Claude has exited fails and records nothing" \
+  '[[ $rc -eq 1 && "$(kinds)" != *"answered q3"* && "$(kinds)" != *"pending q3"* ]]' "rc=$rc $out $(kinds)"
+
+# An order: sent when the worker has stopped, queued under a new id when not.
+out="$("$H" prompt ans/a1 "also fix the footer" --order --no-wait 2>&1)"; rc=$?
+expect "prompt --order to a stopped worker sends it and queues nothing" \
+  '[[ $rc -eq 0 && "$(jq -r ".queued // empty" <<<"$out" 2>/dev/null)" == "" && "$(kinds)" != *"pending o"* ]]' "rc=$rc $out"
+out="$(FAKE_AGENT_STATE=working "$H" prompt ans/a1 "push it" --order --no-wait 2>&1)"; rc=$?
+expect "prompt --order to a busy worker queues it under an order id" \
+  '[[ $rc -eq 0 && "$(jq -r .queued <<<"$out" 2>/dev/null)" == o1 && "$(kinds)" == *"pending o1,"* ]]' "rc=$rc $out"
+out="$("$H" prompt ans/a1 "push it" --answers o1 --no-wait 2>&1)"; rc=$?
+expect "the queued order, sent once the worker stopped, is closed" \
+  '[[ $rc -eq 0 && "$(jq -r .answered <<<"$out" 2>/dev/null)" == o1 && "$(kinds)" == *"answered o1,"* ]]' "rc=$rc $out"
+
+# Without either option prompt is as it was: a busy worker is refused.
+out="$(FAKE_AGENT_STATE=working "$H" prompt ans/a1 "hello" --no-wait 2>&1)"; rc=$?
+expect "a plain prompt to a busy worker is still refused" '[[ $rc -eq 1 && "$out" == *"is working"* ]]' "rc=$rc $out"
+j="$MCV_HOME/ans/journal.log"
+expect "the journal says what became of each: answered, kept as pending" \
+  'grep -qF "answered q1" "$j" && grep -qF "kept as pending q2" "$j" && grep -qF "kept as pending o1" "$j"' "$(cat "$j")"
+
+# The status helper answers whether an id can still take an answer.
+"$ST" --task ans/a1 open q3 >/dev/null 2>&1; rc=$?
+expect "mcv-status open: a question without an answer is open" '[[ $rc -eq 0 ]]' "rc=$rc"
+out="$("$ST" --task ans/a1 open q1 2>&1)"; rc=$?
+expect "mcv-status open: an answered question is not" '[[ $rc -eq 1 && "$out" == *"already answered"* ]]' "rc=$rc $out"
+before="$(cat "$log")"
+"$ST" --task ans/a1 open q3 >/dev/null 2>&1
+expect "mcv-status open writes nothing" '[[ "$(cat "$log")" == "$before" ]]'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

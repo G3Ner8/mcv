@@ -79,11 +79,14 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    ends its turn. Its PreToolUse hook on Bash refuses a git command that reaches past its branch
    (Git guard, below).
 4. **Watch.** `mcv-watch` prints the event; the coordinator relays the question to the user as
-   `<id> #<n>`, reads the worker's screen, sends the answer with `prompt --no-wait`, and records it
-   with `mcv-status --task ... answered`. If the worker is still busy, the coordinator records the
-   answer as `pending` instead, and the watcher prints it back as `DELIVER` when the worker stops.
-   An order that answers no question takes the same path: `pending - <text>` queues it under a
-   new order id (`o1`, ...), picked under the log's lock.
+   `<id> #<n>`, reads the worker's screen, and sends the answer with
+   `prompt --no-wait --answers q<n>`. `prompt` records what became of it, through `mcv-status`:
+   `answered` once the text is sent, `pending` when the worker is busy, and the watcher prints a
+   pending answer back as `DELIVER` when the worker stops. An order that answers no question
+   takes the same path with `--order`: a busy worker gets nothing and the order is queued under
+   a new order id (`o1`, ...), picked under the log's lock. Sending and recording were two
+   commands until 0.2.10; in real runs they were joined with `;` in 13 of 34 calls, and one
+   refused send left a question recorded as answered that could no longer be queued.
 5. **Remove** (`mcv-herdr.sh remove`), when the user agrees: refuse a dirty worktree, remove it
    through herdr (or git, if the workspace is already gone), copy the task's `meta`, `status.log`
    and `transcripts` to `<project>/history/<id>-<UTC time>/` (if that fails, the task state
@@ -275,6 +278,16 @@ worker.
 - No work is sent to a worker that did not get its rules: `prompt` needs `rules-loaded`.
 - An answer or order the user gave is never lost to a busy worker: it waits as `pending` until
   delivered.
+- A question is recorded as answered by a send only when the text went in: `prompt --answers`
+  checks the id first, sends, then records, and records nothing when the send fails.
+- `remove` ends in the same place however many times it is run: each step of taking the worktree
+  and its workspace away (`drop_worktree`, shared with the clearing of a killed spawn) looks at
+  what is there first. Seen twice in real runs before that: a dev server left in the worktree
+  kept writing an ignored folder, git dropped the worktree from its list but could not delete
+  the folder, herdr kept the workspace, and every later `remove` stopped at the folder ("git
+  cannot read") or at herdr ("is not a working tree"). A folder left at the path of a worktree
+  git no longer lists is deleted; if it comes back within a second, `remove` says something
+  still writes there and stops. It does not look for the process or kill it.
 - A worker is refused when it records an answer (`mcv-status --task` with `MCV_TASK` set), and its
   rules forbid it; see Known limits for what that does not stop.
 - Errors are one line; no command leaves a half-made task that `remove` cannot clean up. A spawn
@@ -298,7 +311,7 @@ Measured against herdr 0.9.5 (protocol 22) on macOS, 2026-11-06 and 2026-11-07.
 | `agent start <name> --kind claude --pane <id> -- <claude args>` | In a folder Claude has not trusted, stops at the trust dialog (default answer "No, exit") and fails with `agent_not_ready`; once the user picks "Yes", the agent takes prompts. Claude (2.1.319) records that trust under the repository's main checkout, so every worktree of a trusted repository starts without the dialog; a trusted parent folder does not count. Behind the dialog herdr reports the agent `idle` or `blocked` (both seen), and the SessionStart hook has not run. Without the dialog, `rules-loaded` is already written when `agent start` returns. |
 | `agent prompt <name> <text> --wait [--until ...]` | Text starting with `-` is taken as text. Refuses an agent that is not idle or done. |
 | Claude exiting in its pane | herdr either drops the agent (`agent_not_found`) or lists it as done but refuses prompts (`agent_not_ready`, or `agent_not_running` as seen after `/exit`). `pane read` still shows the screen. |
-| `worktree remove --workspace <id>` | Removes the worktree and closes the workspace. After the user closes the workspace, it fails with `workspace_not_found`, and git removes the worktree instead. |
+| `worktree remove --workspace <id>` | Removes the worktree and closes the workspace. After the user closes the workspace, it fails with `workspace_not_found`, and git removes the worktree instead. When git fails it answers `worktree_remove_failed` with git's own words and keeps the workspace (seen 2026-11-14 and 11-15: "failed to delete ... Directory not empty", then "is not a working tree" once the folder was gone); `workspace close <id>` then closes that workspace (seen 2026-11-15). |
 | Repository workspaces (2026-11-08, 2026-11-09) | Every worktree workspace sits under a workspace for its repository's main checkout. When none is open, one `worktree create` opens both; `worktree remove` closes only the worktree's. Closing the main-checkout workspace closes its worktree workspaces in the same instant. `workspace list` gives each `worktree.is_linked_worktree`, `checkout_path` and `repo_root`; `pane process-info` gives `shell_pid` and `foreground_process_group_id`, equal when the shell is idle. A label may hold spaces and `/`. |
 | Shell in a new pane | `agent start` types the claude command at the pane's shell prompt. Seen: oh-my-zsh's "update? [Y/n]" prompt took the first `c`, the shell ran `laude`, and `agent start` failed with only `timeout: timed out waiting for agent startup`. |
 | `status --json`, `integration status` | `doctor` requires herdr >= 0.9.5 and the Claude integration `current`; updating herdr does not refresh the integration. It also prints mcv's own version, read from `.claude-plugin/plugin.json` beside its copy, which the coordinator shows when it opens: a session keeps the helpers it started with (measured: one ran 0.2.0's after 0.2.2 was installed). |
