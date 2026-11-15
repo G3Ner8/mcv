@@ -165,10 +165,11 @@ H remove brewly/cart-fix                     # close it; keeps the branch if it 
 Run `H` with no arguments for every command and option. By hand you also see what the coordinator
 would: `mcv-watch <project>` (next to `H`) prints each question and stop as it happens
 (`--resume` goes on where the last one stopped, without showing anything twice), and
-`mcv-status --task <project>/<id> answered q<n> "<answer>"` records an answer you sent with
-`prompt` (`amended` records a correction sent after it; `pending - "<order>"` queues an order
-for a busy worker). Run either with no arguments for its
-usage.
+`H prompt <project>/<id> "<answer>" --answers q<n>` sends an answer and records it: as answered
+when it went in, as pending when the worker is busy, to be sent when it stops (`--order` does the
+same for an order that answers nothing). `mcv-status --task <project>/<id> answered q<n> "<why>"`
+closes a question when nothing is sent (you answered in the worker's pane), and `amended` records
+a correction sent after an answer. Run either with no arguments for its usage.
 
 - `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
   `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.
@@ -209,6 +210,8 @@ usage.
   the worker's new state; `read` shows what the worker said. When Claude runs the helper for you, its
   Bash tool stops waiting after 2 minutes unless given a longer timeout, so for long work use
   `prompt --no-wait`, which returns as soon as the worker has started, and check back with `read`.
+  A busy worker is refused, unless the text is an answer (`--answers q<n>`) or an order
+  (`--order`): then nothing is sent, the text is kept, and the output says `queued`.
 - `remove` refuses while the worker is working or waiting at a dialog, and while the worktree has
   uncommitted or untracked files, or when git cannot read it. Files your `.gitignore` ignores
   (build output, dependencies, a local `.env`) are deleted with the worktree. The branch stays as a
@@ -217,7 +220,9 @@ usage.
   name can be used again. It also works after you have closed the worker's herdr workspace
   yourself, and for a task whose `spawn` was killed while herdr was still making its worktree:
   it removes that worktree and the unused branch (`leftover: true`), or you can simply spawn
-  the task again. Before deleting the task's state it copies the task's record to
+  the task again. A `remove` that stopped half way can be run again and goes on from what is
+  left. While something still writes into the worktree's folder (a dev server the worker left
+  running) it refuses and says so: stop that, then run it again. Before deleting the task's state it copies the task's record to
   `~/.claude/mcv/<project>/history/` (see "What mcv writes").
 - herdr shows each worker's workspace, labelled `⧉ <id> · <project>` (task first, since the
   sidebar cuts long labels, after about 12 characters on herdr 0.9.5, so the coordinator keeps

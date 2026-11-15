@@ -4,6 +4,34 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.10] - 2026-11-15
+
+From the logs of real runs on two projects, 12 to 15 November.
+
+### Fixed
+
+- `remove` could stop half way and never finish (seen twice). A dev server left running in the
+  worktree kept writing an ignored folder: git took the worktree out of its list but could not
+  delete the folder, herdr kept the workspace, and every later `remove` stopped at the folder
+  ("git cannot read the state") or at herdr ("is not a working tree"), before the task's record
+  was kept or its pane closed. `remove` now looks at what is there at each step and does what is
+  still to do, so it can be run again and ends in the same place; the clearing of a killed spawn
+  uses the same steps. While something still writes into the folder it refuses and says so. It
+  kills nothing.
+- An answer could be recorded as sent when it was not (seen once; 13 of 34 calls were written in
+  the way that allows it). Sending and recording were two commands, and when the send was
+  refused because the worker was busy, the record was written all the same and the answer could
+  no longer be queued. `prompt --answers <id>` now does both: `answered` when the text went in,
+  `pending` when the worker is busy, nothing when the send fails. `prompt --order` queues a new
+  order for a busy worker the same way. The skill sends answers and orders only this way.
+- The skill did not say to give the Monitor tool `timeout_ms` when starting the watcher. Left
+  out, the watcher ends after 5 minutes, not 30 (seen once).
+
+### Added
+
+- `mcv-status --task <project>/<id> open <id>`: whether a question or a queued order can still
+  take an answer. Writes nothing.
+
 ## [0.2.9] - 2026-11-13
 
 From testing mcv against its own claims: probes with a real Monitor, the screens of a real run,

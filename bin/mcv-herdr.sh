@@ -70,6 +70,18 @@
 #       seconds. Without it, when run from Claude Code's Bash tool, give the
 #       tool a timeout longer than --timeout. Says so plainly when Claude has
 #       exited in the worker's pane.
+#       --answers <id>: the text answers question <id> (q1, q2, ...) or is the
+#       queued order <id> (o1, o2, ...). Sent to a stopped worker, it is
+#       recorded as answered (prints "answered": <id>). To a worker that is
+#       working or at a dialog nothing is sent: the text is kept as pending
+#       (prints "queued": <id>, exit 0), and mcv-watch prints it as a deliver
+#       event when the worker stops. Refused, before anything is sent, for an
+#       id that was never asked or queued, or is answered already. When the
+#       send fails for another reason, nothing is recorded.
+#       --order: the text is a new order that answers nothing. Sent to a
+#       stopped worker as it is; for a busy one it is queued under a new
+#       order id (prints "queued": o<n>), to be sent later with --answers.
+#       Without either option a busy worker is refused, as before.
 #   read <project>/<id> [<lines>]
 #       Print the last lines of the worker's terminal (default 80), plain text,
 #       also after Claude has exited there.
@@ -93,6 +105,12 @@
 #       shell; one the user had open stays. Folders left empty (the project's
 #       tasks folder, herdr's folder for the repository) are removed.
 #       Also works after the user has closed the worker's herdr workspace.
+#       It can be run again after it stopped half way and goes on from what
+#       is left: a worktree git no longer lists, a folder left at its path
+#       (deleted: it holds only what was written after git emptied it), a
+#       herdr workspace still open (closed). Refused, saying so, while
+#       something still writes into the worktree's folder (a dev server
+#       started there): stop it and run remove again. Nothing is killed.
 #       A task whose spawn was killed outright while herdr made its worktree
 #       has no meta, only what spawn wrote down first (tasks/<id>/spawning):
 #       remove then clears the worktree, its herdr workspace and, if it is
@@ -402,6 +420,56 @@ spawn_cleanup() {
   [[ -z "$CLAIM" ]] || rm -rf "$CLAIM"
 }
 
+# Is folder $2 a worktree that git lists for repository $1? Paths are
+# compared by -ef, as git prints them with symlinks resolved.
+is_worktree() {
+  local p
+  [[ -n "$2" && -d "$2" ]] || return 1
+  while IFS= read -r p; do
+    [[ "$p" -ef "$2" ]] && return 0
+  done < <(git -C "$1" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  return 1
+}
+
+# Take worktree $2 of repository $1 and its herdr workspace $3 away, from
+# whatever state an earlier try left them in: each step looks at what is
+# there and does only what is still to do, so running it again after a
+# failure goes on, and ends in the same place. $4 "force" removes a worktree
+# git would keep. The caller has checked that the worktree holds no work.
+#
+# Why it is written this way (seen twice in real runs): a dev server left
+# running in a worktree kept writing an ignored folder. git took the
+# worktree out of its list but could not delete the folder, herdr reported
+# that and kept its workspace, and no later remove could get past either
+# the folder ("git cannot read") or herdr ("is not a working tree").
+#
+# A folder left at the worktree's path once git no longer lists it holds
+# only what was written after git emptied it, so it is deleted. If it comes
+# back, something still writes there: that is said, and nothing is killed.
+drop_worktree() {
+  local repo="$1" wt="$2" ws="$3" force="${4:-}" herr=""
+  if [[ -n "$ws" ]] && ! h_try worktree remove --workspace "$ws"; then
+    [[ "$HERR_CODE" == workspace_not_found ]] || herr="$HERR_MSG"
+  fi
+  if is_worktree "$repo" "$wt"; then
+    git -C "$repo" worktree remove ${force:+--force} "$wt" >/dev/null 2>&1 || true
+    ! is_worktree "$repo" "$wt" \
+      || die "could not remove the worktree $wt${herr:+ (herdr: $herr)}; remove it with git worktree remove, then run this again"
+  fi
+  git -C "$repo" worktree prune 2>/dev/null || true
+  if [[ -n "$wt" && -d "$wt" && ! "$wt" -ef "$repo" ]]; then
+    rm -rf "$wt" 2>/dev/null || true
+    # Long enough for a server that rewrites its cache to do so again.
+    sleep 1
+    [[ ! -d "$wt" ]] \
+      || die "something still writes to $wt (a dev server started there?); stop it, then run this again"
+  fi
+  if [[ -n "$ws" && -n "$herr" ]] && h_try workspace get "$ws"; then
+    h_try workspace close "$ws" \
+      || die "the worktree is gone, but herdr could not close its workspace $ws ($HERR_MSG); close it in herdr, then run this again"
+  fi
+}
+
 # Clear what a spawn killed outright (kill -9, a crash) left when it died
 # between asking herdr for the worktree and writing the task: herdr finishes
 # the worktree and the branch with nobody to record them, `remove` did not
@@ -439,16 +507,13 @@ clear_crashed() {
       || die "refusing: $p, which a killed spawn left, has uncommitted changes; commit or discard them first"
   fi
   lock_repo "$root"
+  ws=""
   if [[ -n "$label" ]]; then
     ws="$(herdr workspace list 2>/dev/null \
       | jq -r --arg l "$label" '[.result.workspaces[]? | select(.label == $l)][0].workspace_id // empty' \
         2>/dev/null || true)"
-    [[ -z "$ws" ]] || herdr worktree remove --workspace "$ws" >/dev/null 2>&1 || true
   fi
-  p="$(worktree_of)"
-  [[ -z "$p" ]] || git -C "$root" worktree remove --force "$p" >/dev/null 2>&1 \
-    || die "could not remove $p, which a killed spawn left; remove it with git worktree remove"
-  git -C "$root" worktree prune 2>/dev/null || true
+  drop_worktree "$root" "$p" "$ws" force
   if [[ "$owned" == true && -n "$base_sha" ]] \
     && [[ "$(git -C "$root" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null || true)" == "$base_sha" ]] \
     && git -C "$root" branch -D "$branch" >/dev/null 2>&1; then
@@ -982,15 +1047,15 @@ cmd_spawn() {
 
 cmd_prompt() {
   need_herdr_pane
-  [[ $# -ge 2 ]] || die "usage: prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]"
-  local task="$1" text="$2" timeout=600000 nowait=""
+  [[ $# -ge 2 ]] || die "usage: prompt <project>/<id> <text> [--answers <id> | --order] [--no-wait] [--timeout <ms>]"
+  local task="$1" text="$2" timeout=600000 nowait="" answers="" order=""
   shift 2
   # A forgotten text would otherwise send an option word, or nothing, and
   # then wait up to ten minutes for the reply.
   case "$text" in
-    --no-wait|--timeout) die "the text is missing ('$text' is an option); usage: prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]" ;;
+    --no-wait|--timeout|--answers|--order) die "the text is missing ('$text' is an option); usage: prompt <project>/<id> <text> [--answers <id> | --order] [--no-wait] [--timeout <ms>]" ;;
   esac
-  [[ "$text" =~ [^[:space:]] ]] || die "no text to send; usage: prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]"
+  [[ "$text" =~ [^[:space:]] ]] || die "no text to send; usage: prompt <project>/<id> <text> [--answers <id> | --order] [--no-wait] [--timeout <ms>]"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --no-wait) nowait=1; shift ;;
@@ -998,13 +1063,30 @@ cmd_prompt() {
         [[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || die "--timeout needs a number of milliseconds"
         timeout="$2"
         shift 2 ;;
+      --answers)
+        [[ $# -ge 2 && "$2" =~ ^[qo][1-9][0-9]*$ ]] \
+          || die "--answers needs the id of a question (q1, q2, ...) or of a queued order (o1, o2, ...)"
+        answers="$2"
+        shift 2 ;;
+      --order) order=1; shift ;;
       *) die "unknown option '$1'" ;;
     esac
   done
+  [[ -z "$answers" || -z "$order" ]] || die "--answers and --order do not go together: a text answers something asked or queued, or is a new order"
 
   local d name status
   d="$(task_dir "$task")" || exit 1
   JTASK="$task"
+  # What became of an answer or an order is recorded here, by the one
+  # command that knows whether the text went in: answered once it is sent,
+  # pending when the worker is busy (the watcher then prints it as a deliver
+  # event when the worker stops). Left to a second command, the record was
+  # written after a refused send (seen in a real run). The status log stays
+  # mcv-status's to write; it is asked first whether the id can take an
+  # answer, so that nothing is sent that could not be recorded.
+  local st_bin
+  st_bin="$(dirname "${BASH_SOURCE[0]}")/mcv-status"
+  [[ -z "$answers" ]] || "$st_bin" --task "$task" open "$answers" || exit 1
   name="$(jfield "$(cat "$d/meta")" .agent)"
   [[ -n "$name" ]] || die "task $task has a damaged meta file ($d/meta)"
   # When Claude exits in its pane, herdr either drops the agent
@@ -1023,6 +1105,17 @@ cmd_prompt() {
     # and the SessionStart hook has not run yet.
     [[ -f "$d/rules-loaded" ]] \
       || die "worker $task is $status and has not started its session yet: if its pane shows Claude's folder trust question, pick Yes there and prompt again"
+    if [[ -n "$answers$order" ]]; then
+      local kept="$answers"
+      if [[ -n "$order" ]]; then
+        kept="$("$st_bin" --task "$task" pending - "$text")" || exit 1
+      else
+        "$st_bin" --task "$task" pending "$answers" "$text" || exit 1
+      fi
+      journal "ok: worker is $status, nothing sent; kept as pending $kept"
+      jq -cn --arg s "$status" --arg k "$kept" '{state: $s, queued: $k}'
+      return 0
+    fi
     die "worker $task is $status; prompt is only sent to a worker that has stopped (idle or done)"
   fi
   # mcv's SessionStart hook leaves this marker. Without it the worker's
@@ -1046,8 +1139,13 @@ cmd_prompt() {
   rm -f "$d/starting"
   status="$(jfield "$HOUT" .result.agent.agent_status)"
   # The text itself is in the worker's transcript; its length is enough here.
-  journal "ok: sent ${#text} characters, state ${status:-unknown}"
-  jq -cn --arg s "${status:-unknown}" '{state: $s}'
+  if [[ -n "$answers" ]]; then
+    "$st_bin" --task "$task" answered "$answers" "$text" \
+      || die "the text was sent to $task, but could not be recorded as answered $answers; record it with mcv-status"
+  fi
+  journal "ok: sent ${#text} characters, state ${status:-unknown}${answers:+, answered $answers}"
+  jq -cn --arg s "${status:-unknown}" --arg a "$answers" \
+    '{state: $s} + (if $a == "" then {} else {answered: $a} end)'
 }
 
 cmd_read() {
@@ -1126,24 +1224,19 @@ cmd_remove() {
       die "herdr agent get: $HERR_MSG"
     fi
   fi
-  # Unsure counts as dirty: a worktree git cannot read is not deleted.
-  if [[ -d "$wt" ]]; then
+  # Unsure counts as dirty: a worktree git cannot read is not deleted. A
+  # folder git no longer lists is what an earlier remove left half way; it
+  # was checked then, and drop_worktree deals with it.
+  if is_worktree "$repo" "$wt"; then
     local st
     st="$(git -C "$wt" status --porcelain 2>/dev/null)" \
       || die "refusing: git cannot read the state of $wt; check it by hand"
     [[ -z "$st" ]] || die "refusing: $wt has uncommitted changes; commit or discard them first"
   fi
-  # When the user has already closed the worker's herdr workspace, herdr no
-  # longer knows the worktree; git removes it instead.
-  if ! h_try worktree remove --workspace "$ws"; then
-    [[ "$HERR_CODE" == workspace_not_found ]] || die "herdr worktree remove: $HERR_MSG"
-    if [[ -d "$wt" ]]; then
-      git -C "$repo" worktree remove "$wt" 2>/dev/null \
-        || die "herdr no longer knows workspace $ws, and git could not remove $wt"
-    else
-      git -C "$repo" worktree prune 2>/dev/null || true
-    fi
-  fi
+  # herdr removes the worktree with its workspace; when the user has already
+  # closed that workspace, or an earlier remove stopped half way, what is
+  # left is taken away by git and by closing the workspace.
+  drop_worktree "$repo" "$wt" "$ws"
   # The task's record outlives it: its meta, status log and the paths of
   # its worker's transcripts, for looking back at a run. If they cannot be
   # kept, the task's state stays where it is.

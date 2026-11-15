@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.9"
+  version: "0.2.10"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -114,7 +114,10 @@ Skip this skill for:
    herdr pane.
 4. **One watcher is running.** If you have not started it in this session, start it with the Monitor
    tool: `BIN/mcv-watch <project>`, with the description `⧉ mcv · <project>` exactly (it is shown
-   after every event). The Monitor tool ends it after 30 minutes (its limit, measured). Start it
+   after every event) and `timeout_ms: 1800000` on every start, the first and each `--resume`.
+   The Monitor tool ends a watcher at that deadline, and 30 minutes is the most it allows; left
+   out, the deadline is 5 minutes (seen in a real run: a first watcher started without it expired
+   after 5). Start it
    again with `BIN/mcv-watch <project> --resume`, which goes on from where the last one stopped and
    shows nothing twice, at once if any worker is still working, at a dialog, or in a wait it
    announced; if every worker has reported `DONE` or `FAILED` or only waits for the user's answer
@@ -255,7 +258,7 @@ text. Lines that start with `|` under a `WAITING` are the dialog as the worker's
 | `STOPPED` | The worker's turn ended without a report, or a wait it announced (`waiting` in its log) has lasted past the watcher's limit. This is not "finished". `read` its screen. If it is still waiting on something that is running, say nothing, or one line if the user is waiting on it; if what it waits on has died or hangs, tell the user. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. It does not come for a worker that has reported (a question, `DONE`, `FAILED`, `BLOCKED`) and been sent nothing since: such a turn end, Claude compacting an idle worker say, changes nothing. |
 | `DONE · <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
 | `FAILED · <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
-| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 5 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait` and record `answered`; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; record `answered` only once it is sent or the user drops it ("dropped by the user"). If `prompt` refuses as busy, record `pending` again. A `DELIVER` comes once per pending line. `DELIVER oN · <order>` is an order the user gave while the worker was busy ("Sending an order" below): `read` its screen, send it with `prompt --no-wait` unless what it asked for is already done (then tell the user), and record `answered oN "<order>"`; if refused as busy, `pending oN` again. |
+| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 2 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait --answers qN`, which records it; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; send it with `--answers qN` on a yes, or if the user drops it record `mcv-status --task <project>/<id> answered qN "dropped by the user"`. If the output says `queued`, the worker was busy again and the answer is kept once more. A `DELIVER` comes once per pending line. `DELIVER oN · <order>` is an order the user gave while the worker was busy ("Sending an order" below): `read` its screen and send it with `prompt --no-wait --answers oN`, unless what it asked for is already done (then tell the user and record `mcv-status --task <project>/<id> answered oN "already done"`). |
 | `GONE` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
 
 If `prompt` says a worker is not running Claude any more, handle it like `GONE`: `read` its screen
@@ -343,29 +346,33 @@ the user cannot find one, name that repo.
    explained it, or offered another course), say back what you would send, in one line, and send
    it only on a yes: `send cart-fix #1 b (once per order)?`
 2. `BIN/mcv-herdr.sh read <project>/<id>` first. If the worker is still waiting on that question,
-   send the answer with `BIN/mcv-herdr.sh prompt <project>/<id> "<answer to <id> #<n>: ...>" --no-wait`,
-   then record it: `BIN/mcv-status --task <project>/<id> answered q<n> "<answer>"`. Send and
-   record the option's words with its letter (`b: once per order`), never the letter alone: the
-   worker and the log must not depend on a card they cannot see.
+   send the answer with one command, which also records it:
+   `BIN/mcv-herdr.sh prompt <project>/<id> "<answer to <id> #<n>: ...>" --no-wait --answers q<n>`.
+   Send the option's words with its letter (`b: once per order`), never the letter alone: the
+   worker and the log must not depend on a card they cannot see. Read the output:
+   - `"answered": "q<n>"`: it went in and the question is closed. Do not record it again.
+   - `"queued": "q<n>"`: the worker was busy (it did not end its turn after asking), nothing was
+     sent, and the answer is kept. Tell the user it goes in when the worker stops. Do not retry
+     and do not just wait: the watcher prints `DELIVER q<n>` as soon as the worker stops (at
+     once if it already has), and you send it then.
+   - an error: nothing was sent and nothing recorded; act on what it says.
+   Never record an answer you send with a second command (`mcv-status ... answered`): a send
+   that was refused would then stand in the log as answered (seen in a real run).
 3. If the user then says they meant something else, send the correction with `prompt` (the worker
-   may already have acted on the first answer: say what changes), and record it with
+   may already have acted on the first answer: say what changes), and only once that send has
+   succeeded record it, in a call of its own, with
    `BIN/mcv-status --task <project>/<id> amended q<n> "<the corrected answer>"`.
 4. If the worker has moved on (the user answered in its pane), send nothing and record
    `BIN/mcv-status --task <project>/<id> answered q<n> "answered by the user in the worker's pane"`.
-5. If `prompt` refuses because the worker is busy, it did not end its turn after asking. Do not
-   retry in a loop, and do not just wait: no event would come, since the question already woke
-   you. Keep the answer: `BIN/mcv-status --task <project>/<id> pending q<n> "<answer>"`. The
-   watcher prints `deliver q<n> <answer>` as soon as the worker stops (at once if it already
-   has); then send it and record `answered`. Tell the user the answer goes in when the worker
-   stops.
+   This, and an answer the user drops, are the only times you run `answered` yourself.
 
 ### Sending an order
 
 Work for a worker that answers no question ("push it", "also fix the footer"): `read` it, then
-send it with `prompt --no-wait`. If `prompt` refuses because the worker is busy, do not retry and
-do not keep it in mind: queue it with `BIN/mcv-status --task <project>/<id> pending - "<order>"`,
-which prints its order id (`o1`), and tell the user in one line that it goes in when the worker
-stops. It comes back as `DELIVER o1`.
+send it with `BIN/mcv-herdr.sh prompt <project>/<id> "<order>" --no-wait --order`. To a worker
+that has stopped it is sent as it is. For a busy one nothing is sent and the output says
+`"queued": "o1"`: the order is kept under that id; tell the user in one line that it goes in when
+the worker stops. It comes back as `DELIVER o1`, and you send it then with `--answers o1`.
 
 ### When the user asks where things stand
 
@@ -395,7 +402,10 @@ table under "How mcv looks to the user".
   then it held no work. After the repository's last worker, it closes the repository workspace
   herdr opened for the workers, if nothing runs in it (`closed_workspace`). It
   refuses while the worker is working or at a dialog, and while the worktree has uncommitted or
-  untracked files; then tell the user, whose call it is.
+  untracked files; then tell the user, whose call it is. If it says something still writes to
+  the worktree (a dev server the worker left running), tell the user what and where, stop it only
+  on their word, and run the same `remove` again: it goes on from where it stopped. Do not
+  delete the worktree folder, the task folder or the herdr workspace by hand.
 - The config: delete `.claude/mcv.json`.
 
 ## Operating rules
