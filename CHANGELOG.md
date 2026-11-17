@@ -4,6 +4,25 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.11] - 2026-11-17
+
+### Changed
+
+- The plugin's description no longer says "Experimental, not yet tried end to end": it has run
+  more than a hundred workers on two projects. It says what is true instead: early, in daily
+  use, by one person.
+- The README opens with a picture of how mcv works, and has two more: the path of a worker's
+  question, and what mcv keeps on your machine (`docs/mcv-*.svg`).
+- The description of each helper command moved from the README to `docs/commands.md`, sorted by
+  command. The README keeps the six commands and the three things to know first.
+- Measured, and written into `docs/architecture.md`: Claude Code's Monitor tool stops its
+  command with SIGTERM, on a stop and on expiry alike.
+- Examples in the changelog and in test comments no longer name a real project.
+- Documentation cleaned of what no longer holds: a note about version 0.1.0 and approval
+  dialogs, a guess from the first run about where herdr lists workers, the statement that a
+  killed spawn can leave a worktree behind with nothing to clear it, and the time `make check`
+  takes. The tests' need for perl is stated.
+
 ## [0.2.10] - 2026-11-15
 
 From the logs of real runs on two projects, 12 to 15 November.
@@ -166,10 +185,10 @@ Leftovers from issue #10, and one finding from checking 0.2.2 on herdr.
 ### Fixed
 
 - An order given while a worker was busy ("push item 1") could only be held in the
-  coordinator's memory and retried at each stop (refused four times on carsol).
+  coordinator's memory and retried at each stop (refused four times in one real run).
   `mcv-status --task <t> pending - <text>` queues it under a new order id (`o1`, ...), and the
   watcher hands it back as `DELIVER o1` when the worker stops, like a pending answer.
-- A worker's workspace label (`mcv carsol/adm...`) was cut in herdr's sidebar before the task
+- A worker's workspace label (`mcv brewly/car...`) was cut in herdr's sidebar before the task
   name. It is now `⧉ <id> · <project>`: the mark the coordinator's events use, then the task.
   The status table's repo column names the workspace a worker sits under. herdr 0.9.5 offers no
   way to place a workspace elsewhere. When herdr's answer to `worktree create` cannot be read,

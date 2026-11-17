@@ -9,7 +9,7 @@ rules below in full.
 ## Commands
 
 ```
-make check        lint, JSON and versions, version raised, the whole suite (2-3 minutes);
+make check        lint, JSON and versions, version raised, the whole suite (about 7 minutes);
                   before every commit
 make test         the suite only (tests/run.sh; tests/run.sh test-x.sh runs one file)
 make lint         shellcheck
@@ -26,7 +26,8 @@ make lint         shellcheck
   `tests/fixtures/fake-herdr.sh` and point `MCV_HOME` at a temporary folder. Write the failing test
   first.
 - **One behaviour, four descriptions.** A command's behaviour is written in the usage header at the
-  top of its script, in the README, in `skills/mcv/SKILL.md` and in `docs/architecture.md`. A change
+  top of its script, in `docs/commands.md` (the README keeps a short version), in
+  `skills/mcv/SKILL.md` and in `docs/architecture.md`. A change
   to what a command accepts, prints or refuses updates every one that mentions it.
 - **A shipped change needs a new version.** Installed copies update only when the version
   changes, so a change to `bin/`, `skills/`, `hooks/` or `.claude-plugin/` raises it in

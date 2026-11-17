@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 612" role="img" aria-labelledby="t d">
+  <title id="t">How mcv works</title>
+  <desc id="d">You talk to one coordinator session. It hands tasks to workers, each on its own copy of the code and its own branch, and brings their questions and results back to you.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #14202e; }
+    .display { font-weight: 700; }
+    .muted { fill: #5a6878; }
+    .accent-text { fill: #1b5fd0; font-weight: 600; }
+    .box { fill: #ffffff; stroke: #14202e; stroke-width: 1.5; }
+    .box-lead { fill: #e6eefb; stroke: #1b5fd0; stroke-width: 1.5; }
+    .box-ghost { fill: none; stroke: #c4ced9; stroke-width: 1.5; stroke-dasharray: 5 5; }
+    .rule { stroke: #c4ced9; stroke-width: 1; }
+    .out { stroke: #14202e; stroke-width: 1.5; fill: none; }
+    .back { stroke: #1b5fd0; stroke-width: 1.5; fill: none; stroke-dasharray: 6 4; }
+    .head-out { fill: #14202e; }
+    .head-back { fill: #1b5fd0; }
+    .mark { fill: #ffffff; stroke: #14202e; stroke-width: 2; }
+    .step { fill: none; stroke: #14202e; stroke-width: 1.5; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #18212b; }
+      text { fill: #e8eef5; }
+      .muted { fill: #9aa8b8; }
+      .accent-text { fill: #82acff; }
+      .box { fill: #18212b; stroke: #e8eef5; }
+      .box-lead { fill: #1c2c47; stroke: #82acff; }
+      .box-ghost { stroke: #36434f; }
+      .rule { stroke: #36434f; }
+      .out { stroke: #e8eef5; }
+      .back { stroke: #82acff; }
+      .head-out { fill: #e8eef5; }
+      .head-back { fill: #82acff; }
+      .mark { fill: #18212b; stroke: #e8eef5; }
+      .step { stroke: #e8eef5; }
+    }
+  </style>
+  <defs>
+    <marker id="head-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="head-out" d="M0 0 L10 5 L0 10 Z"/>
+    </marker>
+    <marker id="head-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="head-back" d="M0 0 L10 5 L0 10 Z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1000" height="612" rx="12"/>
+
+  <rect class="mark" x="40" y="37" width="16" height="16" rx="2"/>
+  <rect class="mark" x="47" y="30" width="16" height="16" rx="2"/>
+  <text class="display" x="76" y="52" font-size="24">mcv</text>
+  <text class="muted" x="40" y="84" font-size="15">One conversation with you. Several Claude Code sessions at work.</text>
+  <line class="rule" x1="40" y1="106" x2="960" y2="106"/>
+
+  <rect class="box" x="40" y="196" width="150" height="96" rx="10"/>
+  <text class="display" x="115" y="240" font-size="18" text-anchor="middle">You</text>
+  <text class="muted" x="115" y="263" font-size="12" text-anchor="middle">talk to one session</text>
+
+  <rect class="box-lead" x="320" y="176" width="210" height="136" rx="10"/>
+  <text class="display" x="425" y="222" font-size="18" text-anchor="middle">Coordinator</text>
+  <text class="muted" x="425" y="244" font-size="12" text-anchor="middle">the session you talk to</text>
+  <text x="425" y="274" font-size="12" text-anchor="middle">hands out the work,</text>
+  <text x="425" y="291" font-size="12" text-anchor="middle">never does it itself</text>
+
+  <line class="out" x1="190" y1="230" x2="318" y2="230" marker-end="url(#head-out)"/>
+  <text x="255" y="220" font-size="11" text-anchor="middle">tasks, answers</text>
+  <line class="back" x1="320" y1="258" x2="192" y2="258" marker-end="url(#head-back)"/>
+  <text class="accent-text" x="255" y="278" font-size="11" text-anchor="middle">questions, results</text>
+
+  <rect class="box" x="680" y="132" width="280" height="76" rx="10"/>
+  <text class="display" x="700" y="164" font-size="15">Worker · cart-fix</text>
+  <text class="muted" x="700" y="186" font-size="12">its own copy of the code, its own branch</text>
+
+  <rect class="box" x="680" y="226" width="280" height="76" rx="10"/>
+  <text class="display" x="700" y="258" font-size="15">Worker · loyalty-csv</text>
+  <text class="muted" x="700" y="280" font-size="12">its own copy of the code, its own branch</text>
+
+  <rect class="box-ghost" x="680" y="320" width="280" height="76" rx="10"/>
+  <text class="muted" x="700" y="352" font-size="15">More workers</text>
+  <text class="muted" x="700" y="374" font-size="12">up to the limit you set</text>
+
+  <text class="muted" x="960" y="420" font-size="11" text-anchor="end">each a Claude Code session in its own pane</text>
+
+  <line class="out" x1="530" y1="214" x2="678" y2="158" marker-end="url(#head-out)"/>
+  <line class="back" x1="680" y1="182" x2="532" y2="230" marker-end="url(#head-back)"/>
+  <line class="out" x1="530" y1="254" x2="678" y2="252" marker-end="url(#head-out)"/>
+  <line class="back" x1="680" y1="276" x2="532" y2="270" marker-end="url(#head-back)"/>
+  <text x="584" y="168" font-size="11" text-anchor="middle">tasks, answers</text>
+  <text class="accent-text" x="612" y="296" font-size="11" text-anchor="middle">questions, results</text>
+
+  <line class="rule" x1="40" y1="448" x2="960" y2="448"/>
+
+  <circle class="step" cx="53" cy="486" r="13"/>
+  <text class="display" x="53" y="491" font-size="13" text-anchor="middle">1</text>
+  <text class="display" x="76" y="491" font-size="14">You ask</text>
+  <text class="muted" x="40" y="520" font-size="12">Name the tasks you want</text>
+  <text class="muted" x="40" y="537" font-size="12">done side by side.</text>
+
+  <circle class="step" cx="237" cy="486" r="13"/>
+  <text class="display" x="237" y="491" font-size="13" text-anchor="middle">2</text>
+  <text class="display" x="260" y="491" font-size="14">Work goes out</text>
+  <text class="muted" x="224" y="520" font-size="12">Each task goes to its own</text>
+  <text class="muted" x="224" y="537" font-size="12">worker, on its own branch.</text>
+
+  <circle class="step" cx="421" cy="486" r="13"/>
+  <text class="display" x="421" y="491" font-size="13" text-anchor="middle">3</text>
+  <text class="display" x="444" y="491" font-size="14">A worker asks</text>
+  <text class="muted" x="408" y="520" font-size="12">Its question comes to you,</text>
+  <text class="muted" x="408" y="537" font-size="12">in the one conversation.</text>
+
+  <circle class="step" cx="605" cy="486" r="13"/>
+  <text class="display" x="605" y="491" font-size="13" text-anchor="middle">4</text>
+  <text class="display" x="628" y="491" font-size="14">You answer once</text>
+  <text class="muted" x="592" y="520" font-size="12">The coordinator passes</text>
+  <text class="muted" x="592" y="537" font-size="12">your answer on.</text>
+
+  <circle class="step" cx="789" cy="486" r="13"/>
+  <text class="display" x="789" y="491" font-size="13" text-anchor="middle">5</text>
+  <text class="display" x="812" y="491" font-size="14">You decide</text>
+  <text class="muted" x="776" y="520" font-size="12">Review each result. Nothing</text>
+  <text class="muted" x="776" y="537" font-size="12">is merged unless you say so.</text>
+
+  <line class="rule" x1="40" y1="562" x2="960" y2="562"/>
+  <text x="40" y="589" font-size="12">Each worker works on its own branch.</text>
+  <text x="960" y="589" font-size="12" text-anchor="end">The coordinator never approves or merges for you.</text>
+</svg>

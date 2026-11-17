@@ -251,7 +251,7 @@ expect "a task from before 0.2.1 (no base commit) keeps its branch" \
 
 # The worker's workspace is labelled as mcv's in herdr's sidebar, task id
 # first: the sidebar cuts long labels, and the project is the part a reader
-# can spare (measured on herdr 0.9.5: "mcv carsol/adm..." hid the task).
+# can spare (measured on herdr 0.9.5: "mcv brewly/car..." hid the task).
 "$H" spawn solo l1 "$repo" fix/l1 >/dev/null 2>&1
 expect "the worker's workspace label is '⧉ l1 · solo'" \
   'herdr workspace list | jq -e ".result.workspaces[] | select(.label == \"⧉ l1 · solo\")" >/dev/null'

@@ -1,12 +1,14 @@
 # mcv
 
-> **Early: in daily use on one project.** mcv has run a real project (two repositories) on five
-> days, more than fifty workers, most of them from a task to a merge request, and every release since 0.2.1
-> comes from what those runs showed (see the [changelog](CHANGELOG.md)). It has been used by one
-> person, on macOS with herdr 0.9.5 only. Expect rough edges.
+> **Early: in daily use on two projects.** Between 8 and 17 November 2026 mcv ran more than a
+> hundred workers on two real projects, most of them from a task to a merge request, and every
+> release since 0.2.1 comes from what those runs showed (see the [changelog](CHANGELOG.md)). It
+> has been used by one person, on macOS with herdr 0.9.5 only. Expect rough edges.
 
 mcv lets you run several Claude Code sessions on one project at once, while you talk to only one of
 them.
+
+![How mcv works: you talk to one coordinator session, which hands tasks to workers, each on its own branch, and brings their questions and results back to you](docs/mcv-overview.svg)
 
 You work in one Claude Code session, the **coordinator**. When a task can run on its own, the
 coordinator starts a **worker**: another Claude Code session, in its own git worktree on its own
@@ -39,8 +41,9 @@ run (use Claude Code subagents inside one session).
   one of its panes. Every `mcv-herdr.sh` command, `doctor` included, refuses to run from a plain
   terminal, so `/mcv` does too.
 - `jq` 1.5 or newer, `git` 2.17 or newer, and bash 3.2 or newer. Written on macOS (stock bash
-  3.2); the tests also pass on Ubuntu 24.04, and the main commands were checked with jq 1.5 and
-  git 2.17. Running the tests needs git 2.28 or newer. herdr itself is tested only on macOS here.
+  3.2); the whole test suite also passes on Ubuntu 24.04 (bash 5.2, git 2.43, jq 1.7; run
+  2026-11-17), and the main commands were checked with jq 1.5 and git 2.17. Running the tests needs git 2.28 or newer, and perl. herdr itself is tested only on
+  macOS here.
 
 ## Install
 
@@ -129,6 +132,8 @@ Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
   Reply  cart-fix #1 a
 ```
 
+![The path of a question: the worker writes it to a status log, a watcher sees the new line and wakes the coordinator, which asks you; your answer goes back through the coordinator to the worker](docs/mcv-question.svg)
+
 Questions have numbers and options have letters, so a reply cannot mix them up. If the
 conversation has moved on from a card before you answer it, the coordinator says back what it
 will send and waits for your yes. A worker's progress notes, and the waits it announces while a
@@ -140,17 +145,10 @@ there to catch the eye.
 
 ## Run the helper by hand
 
-Everything the coordinator does goes through `bin/mcv-herdr.sh`, which you can also run yourself.
-It is not on your `PATH`. Find the installed copy once:
-
-```
-find ~/.claude/plugins/cache/mcv -name mcv-herdr.sh
-```
-
-There is one folder per installed version (`.../mcv/mcv/<version>/bin/`); use the newest. Do not
-use the copy under `~/.claude/plugins/marketplaces/`: that is the marketplace's checkout, not the
-plugin Claude Code runs. Call it by its full path, either by asking Claude to run it or by typing it
-after `!` in Claude Code. Below, `H` stands for that path.
+Everything the coordinator does goes through `bin/mcv-herdr.sh`, which you can also run yourself
+when a run goes wrong or you want to see what the coordinator sees. It is not on your `PATH`;
+find the installed copy with `find ~/.claude/plugins/cache/mcv -name mcv-herdr.sh` and call the
+newest by its full path, written `H` here:
 
 ```
 H doctor                                     # herdr, its server, the integration, jq; prints mcv's version
@@ -162,99 +160,14 @@ H agents                                     # every herdr agent and its state
 H remove brewly/cart-fix                     # close it; keeps the branch if it holds work
 ```
 
-Run `H` with no arguments for every command and option. By hand you also see what the coordinator
-would: `mcv-watch <project>` (next to `H`) prints each question and stop as it happens
-(`--resume` goes on where the last one stopped, without showing anything twice), and
-`H prompt <project>/<id> "<answer>" --answers q<n>` sends an answer and records it: as answered
-when it went in, as pending when the worker is busy, to be sent when it stops (`--order` does the
-same for an order that answers nothing). `mcv-status --task <project>/<id> answered q<n> "<why>"`
-closes a question when nothing is sent (you answered in the worker's pane), and `amended` records
-a correction sent after an answer. Run either with no arguments for its usage.
+[docs/commands.md](docs/commands.md) describes each command: what it accepts, what it refuses
+and why, and what to do when one fails. Three things are worth knowing before you need that page:
 
-- `brewly` is a **project** name and `cart-fix` a **task id**; you choose both. Use lowercase letters, digits,
-  `-` and `_`; the project starts with a letter; `<project>-<id>` is at most 32 characters.
-- `spawn` needs a branch name that does not exist yet, locally, on a remote or as a tag; `main`,
-  `master`, `develop` and a remote's own name (`origin`) are always refused, and so is a name one
-  folder above or below an existing branch (`main/x`, or `feat` while `feat/x` exists). Names are
-  compared ignoring letter case. It fetches first, then
-  starts the branch from the default branch of `origin` (for example `origin/main`), or of the only
-  remote when none is called `origin`, or from `--base <ref>` if you give one, so a worker never
-  starts from a stale or unrelated checkout. A repository with no remote starts from its current
-  HEAD; a `--base` that names a local branch is used as it is. If the default branch cannot be found
-  (offline, several remotes and none called `origin`, nothing pushed yet), `spawn` stops and asks
-  for `--base` rather than branch from a stale HEAD. The
-  new branch has no upstream, so a plain `git push` from the worker cannot reach the base branch; the
-  worker sets one when it first pushes its own branch. Two spawns in the same repository run one
-  after the other.
-- `spawn ... <branch> --existing` puts a worker on a branch that is already on the remote instead,
-  such as a merge request's branch that needs review fixes: the worktree starts at the remote's
-  tip with that branch as its upstream, so the worker's plain `git push` updates the request, and
-  its rules tell it not to open another one. It refuses the remote's default branch (and `main`,
-  `master`, `develop`), a branch the remote does not have, one another worker is on, and a local
-  branch of that name that is checked out or holds commits the remote lacks; a local branch that
-  is only behind is moved up first. `remove` keeps the branch. `--context <folder>` and `.worktreeinclude`: see
-  [What a worker has](#what-a-worker-has). The worktree goes under `~/.herdr/worktrees/`. If no herdr workspace is open for
-  that repository yet, herdr also opens one for its main checkout. herdr's sidebar lists each
-  worker under the workspace it takes as that main checkout, which is not always the
-  coordinator's. In the first run they appeared under another workspace open on the same
-  repository. Starting the coordinator in a workspace opened in the repository's folder, with no
-  other workspace open on it, should keep them under the coordinator; that is not yet measured.
-- If `spawn` fails while starting Claude, the task is left in place. The usual cause is Claude's
-  folder trust dialog. Claude keeps that trust per repository, counting a worktree as its
-  repository's main checkout, so the dialog appears only until "Yes" has been picked once for the
-  repository: in a worker's pane, or by opening Claude in the repository itself. A trusted folder
-  above the repository does not count, so in Brewly each of `web`, `api` and `staff` asks once.
-  Its default answer is "No, exit": pick "Yes" in the worker's herdr pane, and `prompt` then works.
-  Otherwise run `remove` before using the same id again.
-- `prompt` waits until the worker stops, up to 10 minutes by default (`--timeout <ms>`). It prints only
-  the worker's new state; `read` shows what the worker said. When Claude runs the helper for you, its
-  Bash tool stops waiting after 2 minutes unless given a longer timeout, so for long work use
-  `prompt --no-wait`, which returns as soon as the worker has started, and check back with `read`.
-  A busy worker is refused, unless the text is an answer (`--answers q<n>`) or an order
-  (`--order`): then nothing is sent, the text is kept, and the output says `queued`.
-- `remove` refuses while the worker is working or waiting at a dialog, and while the worktree has
-  uncommitted or untracked files, or when git cannot read it. Files your `.gitignore` ignores
-  (build output, dependencies, a local `.env`) are deleted with the worktree. The branch stays as a
-  local branch; push it first if you need it elsewhere. A branch that never moved from where it
-  started, has no upstream and is on no remote held no work, so `remove` deletes it, and the same
-  name can be used again. It also works after you have closed the worker's herdr workspace
-  yourself, and for a task whose `spawn` was killed while herdr was still making its worktree:
-  it removes that worktree and the unused branch (`leftover: true`), or you can simply spawn
-  the task again. A `remove` that stopped half way can be run again and goes on from what is
-  left. While something still writes into the worktree's folder (a dev server the worker left
-  running) it refuses and says so: stop that, then run it again. Before deleting the task's state it copies the task's record to
-  `~/.claude/mcv/<project>/history/` (see "What mcv writes").
-- herdr shows each worker's workspace, labelled `⧉ <id> · <project>` (task first, since the
-  sidebar cuts long labels, after about 12 characters on herdr 0.9.5, so the coordinator keeps
-  ids that short when it can), under a workspace for its
-  repository's main checkout, and opens that one if you do not have it open. After the last
-  worker of a repository, `remove` closes the one herdr opened for it, unless you have started
-  using it; one you opened yourself is never closed. **Closing a repository's workspace in herdr
-  closes the workers under it.**
-- `spawn` starts Claude by typing the `claude` command at the new pane's shell prompt. Anything
-  your shell asks first takes part of that command: oh-my-zsh's update question did, and Claude
-  never started. The error then ends with the pane's last lines. For oh-my-zsh, set
-  `zstyle ':omz:update' mode reminder` in `~/.zshrc`.
-- `prompt` refuses a worker that has not received mcv's rules (below), since it would never
-  report its questions. Usually it is still at the folder trust dialog: pick "Yes" there and
-  prompt again. Otherwise its Claude did not load the mcv plugin, which happens when mcv is
-  installed for one project only, or when you run the helper from a clone (pass
-  `-- --plugin-dir <that clone>` to `spawn`); `remove` the worker and spawn it again.
-- `read` shows the worker's screen even after Claude has exited there; `prompt` then says the worker
-  is no longer running Claude.
-- Task state is kept outside every repository, in `~/.claude/mcv/<project>/tasks/<id>/`; set
-  `MCV_HOME` to keep it elsewhere (`spawn` passes it on to each worker; a relative path is taken
-  from the folder you run the helper in).
-
-Worker states, as herdr reports them:
-
-| State | Meaning | `prompt` accepted? |
-|---|---|---|
-| `working` | busy | no |
-| `blocked` | waiting at an approval or question dialog | no |
-| `done` | stopped; its output not yet viewed | yes |
-| `idle` | stopped | yes |
-| `unknown` | herdr cannot tell | no |
+- **A worker that will not start** is usually at Claude's folder trust dialog, which appears
+  until "Yes" has been picked once for the repository. Pick "Yes" in the worker's herdr pane.
+- **`remove` keeps a branch that holds work** and refuses a worktree with uncommitted or
+  untracked files. Files your `.gitignore` ignores are deleted with the worktree.
+- **Closing a repository's workspace in herdr closes the workers under it.**
 
 ## What a worker has
 
@@ -314,8 +227,9 @@ To make a worker ask before acting, pass Claude's own flag after `--`:
 H spawn brewly cart-fix ~/code/brewly/web fix/cart-total -- --permission-mode default
 ```
 
-In 0.1.0 such a worker stops in the `blocked` state at each approval dialog, and the helper cannot
-answer it: switch to the worker's herdr pane and approve or deny there.
+Such a worker stops at each approval dialog. The coordinator tells you which worker is waiting and
+what the dialog asks, and never answers it: switch to the worker's herdr pane and approve or deny
+there.
 
 `spawn` refuses two of Claude's flags after `--`, in both the `--flag value` and `--flag=value`
 forms: `--add-dir`, which would let the worker edit a folder outside the deny rule that keeps a
@@ -361,6 +275,8 @@ to push without being told, workers will not push.
 
 ## What mcv writes
 
+![What mcv keeps on your machine: one settings file and a branch per worker in your project, each worker's worktree under ~/.herdr/worktrees, and mcv's own records under ~/.claude/mcv](docs/mcv-places.svg)
+
 - **In your project:** only `.claude/mcv.json`, once you agree to it. If that folder is a git
   repository where the file is not ignored, the coordinator offers to ignore it for you on this
   machine (`.git/info/exclude`), without touching the project's `.gitignore`.
@@ -379,6 +295,8 @@ to push without being told, workers will not push.
 
 ## Documentation
 
+- [docs/commands.md](docs/commands.md): every command of the helper scripts, for running them
+  by hand.
 - [docs/architecture.md](docs/architecture.md): the parts, the state they keep, the rules they
   hold, and the herdr behaviour mcv relies on.
 - [docs/adr/](docs/adr/): why mcv is built the way it is, one decision per record.

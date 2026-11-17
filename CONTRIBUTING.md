@@ -5,9 +5,11 @@ how it is built, [docs/architecture.md](docs/architecture.md).
 
 ## Setup
 
-You need bash 3.2 or newer, git 2.28 or newer (the tests use `git init -b`), jq 1.5 or newer, and
-[shellcheck](https://www.shellcheck.net/) for linting. herdr is not needed for the tests; it is for
-trying a change for real.
+You need bash 3.2 or newer, git 2.28 or newer (the tests use `git init -b`), jq 1.5 or newer, perl
+(one watcher test times when lines arrive), and [shellcheck](https://www.shellcheck.net/) for
+linting. herdr is not needed for the tests; it is for trying a change for real. `make lint` is
+clean with shellcheck 0.11.0; shellcheck 0.9.0, which Ubuntu 24.04 packages, reports three
+SC2015 notes there and fails it.
 
 To try a change in Claude Code without installing it, start a session with the plugin loaded from
 your clone:
@@ -27,14 +29,15 @@ skills/mcv/       SKILL.md, the coordinator's procedure
 hooks/            hooks.json; every hook does nothing unless MCV_TASK names a task
 bin/              mcv-herdr.sh (the only file that calls herdr), mcv-status, mcv-watch
 tests/            test-*.sh, run.sh, fixtures/ (fake-herdr.sh, stub-herdr.sh)
-docs/             architecture.md, adr/ (decision records)
+docs/             commands.md (the scripts, for a person), architecture.md, adr/ (decision records)
 ```
 
 ## Checks
 
 ```
 make check          lint, JSON and versions, the version check, then the whole test suite
-                    (two to three minutes)
+                    (about seven minutes; do not switch or create branches meanwhile:
+                    the suite fails when this checkout's refs change during a run)
 make test           the test suite only
 make test-hooks     the hook-guard test alone (what CI runs)
 make lint           shellcheck: bin/ at style level, tests/ at warning level

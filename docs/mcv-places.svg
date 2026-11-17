@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 468" role="img" aria-labelledby="t d">
+  <title id="t">What mcv keeps on your machine, and where</title>
+  <desc id="d">In your project mcv adds one settings file and a branch per worker. Each worker's copy of the code is a folder under the herdr worktrees folder, deleted when the worker is removed. mcv's own records live under the Claude folder in your home: a running task's state, deleted on removal, and a journal and history that stay until you delete them.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #14202e; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .display { font-weight: 700; }
+    .muted { fill: #5a6878; }
+    .accent-text { fill: #1b5fd0; font-weight: 600; }
+    .box { fill: #ffffff; stroke: #14202e; stroke-width: 1.5; }
+    .rule { stroke: #c4ced9; stroke-width: 1; }
+    .kept { fill: #1b5fd0; stroke: #1b5fd0; stroke-width: 1.5; }
+    .gone { fill: none; stroke: #5a6878; stroke-width: 1.5; }
+    .mark { fill: #ffffff; stroke: #14202e; stroke-width: 2; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #18212b; }
+      text { fill: #e8eef5; }
+      .muted { fill: #9aa8b8; }
+      .accent-text { fill: #82acff; }
+      .box { fill: #18212b; stroke: #e8eef5; }
+      .rule { stroke: #36434f; }
+      .kept { fill: #82acff; stroke: #82acff; }
+      .gone { stroke: #9aa8b8; }
+      .mark { fill: #18212b; stroke: #e8eef5; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="1000" height="468" rx="12"/>
+
+  <rect class="mark" x="40" y="37" width="16" height="16" rx="2"/>
+  <rect class="mark" x="47" y="30" width="16" height="16" rx="2"/>
+  <text class="display" x="76" y="52" font-size="24">mcv</text>
+  <text class="muted" x="40" y="84" font-size="15">What mcv keeps on your machine, and where.</text>
+  <line class="rule" x1="40" y1="106" x2="960" y2="106"/>
+
+  <rect class="box" x="40" y="130" width="290" height="262" rx="10"/>
+  <text class="display" x="60" y="162" font-size="15">In your project</text>
+  <text class="mono accent-text" x="60" y="184" font-size="12">~/code/brewly/</text>
+  <line class="rule" x1="60" y1="200" x2="310" y2="200"/>
+  <circle class="kept" cx="65" cy="225" r="4"/>
+  <text class="mono" x="80" y="229" font-size="12">.claude/mcv.json</text>
+  <text class="muted" x="80" y="248" font-size="11.5">The project's settings: the only file</text>
+  <text class="muted" x="80" y="264" font-size="11.5">mcv adds here, once you agree.</text>
+  <circle class="kept" cx="65" cy="295" r="4"/>
+  <text x="80" y="299" font-size="12">A branch per worker</text>
+  <text class="muted" x="80" y="318" font-size="11.5">In each repository's git. Kept when</text>
+  <text class="muted" x="80" y="334" font-size="11.5">it holds work.</text>
+
+  <rect class="box" x="355" y="130" width="290" height="262" rx="10"/>
+  <text class="display" x="375" y="162" font-size="15">Workers' copies of the code</text>
+  <text class="mono accent-text" x="375" y="184" font-size="12">~/.herdr/worktrees/</text>
+  <line class="rule" x1="375" y1="200" x2="625" y2="200"/>
+  <circle class="gone" cx="380" cy="225" r="4"/>
+  <text x="395" y="229" font-size="12">A folder per worker</text>
+  <text class="muted" x="395" y="248" font-size="11.5">A git worktree on the worker's own</text>
+  <text class="muted" x="395" y="264" font-size="11.5">branch, so no worker touches your</text>
+  <text class="muted" x="395" y="280" font-size="11.5">checkout or another worker's.</text>
+
+  <rect class="box" x="670" y="130" width="290" height="262" rx="10"/>
+  <text class="display" x="690" y="162" font-size="15">mcv's own records</text>
+  <text class="mono accent-text" x="690" y="184" font-size="12">~/.claude/mcv/brewly/</text>
+  <line class="rule" x1="690" y1="200" x2="940" y2="200"/>
+  <circle class="gone" cx="695" cy="225" r="4"/>
+  <text class="mono" x="710" y="229" font-size="12">tasks/cart-fix/</text>
+  <text class="muted" x="710" y="248" font-size="11.5">A running task: its details and its</text>
+  <text class="muted" x="710" y="264" font-size="11.5">status log.</text>
+  <circle class="kept" cx="695" cy="295" r="4"/>
+  <text class="mono" x="710" y="299" font-size="12">journal.log</text>
+  <text class="muted" x="710" y="318" font-size="11.5">One line per command mcv ran.</text>
+  <circle class="kept" cx="695" cy="349" r="4"/>
+  <text class="mono" x="710" y="353" font-size="12">history/</text>
+  <text class="muted" x="710" y="372" font-size="11.5">The record of each removed task.</text>
+
+  <line class="rule" x1="40" y1="416" x2="960" y2="416"/>
+  <circle class="kept" cx="45" cy="439" r="4"/>
+  <text x="58" y="443" font-size="12">Stays until you delete it.</text>
+  <circle class="gone" cx="245" cy="439" r="4"/>
+  <text x="258" y="443" font-size="12">Deleted when the worker is removed.</text>
+  <text class="muted" x="960" y="443" font-size="12" text-anchor="end">Worktrees and records sit outside your repositories.</text>
+</svg>

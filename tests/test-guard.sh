@@ -67,7 +67,7 @@ allows 'git checkout -b scratch'
 allows 'git log --oneline | head'
 allows 'echo "git push --force"'
 allows 'grep -r "git push origin main" docs'
-# Redirections are not refspecs (measured on carsol: "this pushes to 2>").
+# Redirections are not refspecs (measured in a real run: "this pushes to 2>").
 allows 'git push -u origin fix/cart 2>&1'
 allows 'git push -u origin fix/cart 2>&1 | tail -5'
 allows 'git push -u origin fix/cart >/tmp/push.log 2>&1'
