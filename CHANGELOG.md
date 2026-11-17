@@ -4,6 +4,31 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-11-17
+
+### Changed
+
+- What the coordinator shows is a card with fixed places, so it reads at a glance. Measured over
+  two projects: a relayed question took 16 lines at the median and 44 at the longest, a finished
+  task 13 and 38, with the question itself somewhere inside a paragraph of background, options
+  that were whole sentences, and the line to reply with at the bottom under further prose. A card
+  now has a bold header line (task, event, repo, branch), a body with each thing in its place,
+  and a last line that says what to do, with nothing after it. Cards are markdown, not code
+  blocks, and hold no tables.
+- A worker gives a question in parts, and the coordinator places them without cutting anything:
+  `mcv-status needs-decision "<question>" --why "<background>" --option "<label>" "<what
+  follows>" ... --recommend <letter>`. The script letters the options (two to six, or none) and
+  refuses a single option, an option with nothing following from it, and a recommendation that
+  names no option. `done` takes `--checked` and `--left` the same way. The parts are kept in the
+  event's text, each after ` ¶ `; a `¶` in the worker's own words becomes a space.
+- The rules a worker receives ask for the question as one short sentence, the background in two
+  sentences at most, and option labels of a few words. The lengths are asked for, not enforced.
+
+### Not yet tried for real
+
+- Whether workers and the coordinator keep to the new shape in a real run; the tests show only
+  that the parts are stored and the rules are given.
+
 ## [0.2.11] - 2026-11-17
 
 ### Changed

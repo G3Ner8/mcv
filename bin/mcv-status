@@ -3,9 +3,18 @@
 # mcv-status: a worker's status log, and the text mcv's hooks give a worker.
 #
 # A worker (a Claude Code session with MCV_TASK=<project>/<id> set) reports:
-#   mcv-status needs-decision <text>   ask the user a question; prints its id (q1, q2, ...)
+#   mcv-status needs-decision <question> [--why <text>]
+#              [--option <label> <what follows>]... [--recommend <letter>]
+#                                      ask the user a question; prints its id (q1, q2, ...).
+#                                      Options are lettered a to f in the order given: two
+#                                      or more, or none; --recommend names one of them
 #   mcv-status blocked <text>          cannot continue
-#   mcv-status done <text>             the task is finished
+#   mcv-status done <result> [--checked <text>] [--left <text>]
+#                                      the task is finished: what was verified, and what
+#                                      is not done or waits for the user
+# The parts go into the event's text after the question or the result, each
+# after " ¶ ": "why: ...", "a: <label> => <what follows>", "recommends: a",
+# "checked: ...", "left: ...". A ¶ in the worker's own words becomes a space.
 #   mcv-status failed <text>           giving up, with the reason
 #   mcv-status note <text>             progress worth knowing; needs no answer and
 #                                      wakes nobody (status table only)
@@ -196,6 +205,87 @@ append() {
 # True when text $1 still says something once cleaned.
 has_text() { [[ "$(clean "$1")" =~ [^[:space:]] ]]; }
 
+# Print one part of a question or a result: cleaned, and without the mark
+# that separates parts, so a worker's own words cannot start a part.
+part() {
+  local text
+  text="$(clean "$1")"
+  printf '%s' "${text//¶/ }"
+}
+
+# Print the text of a needs-decision or a done ($1) from its arguments: the
+# question or the result, then each part after " ¶ ", options lettered here
+# so two questions never letter them differently. The coordinator shows the
+# parts as they are; a paragraph it had to cut down itself was the long,
+# hard-to-read card.
+with_parts() {
+  local kind="$1" head="" why="" checked="" left="" rec="" into=head out
+  local n=0 i letters=abcdef
+  local -a opts=()
+  shift
+  while (( $# > 0 )); do
+    case "$1" in
+      --why|--recommend|--option)
+        [[ "$kind" == needs-decision ]] || usage "$1 belongs to needs-decision, not to $kind" ;;
+      --checked|--left)
+        [[ "$kind" == "done" ]] || usage "$1 belongs to done, not to $kind" ;;
+    esac
+    case "$1" in
+      --why|--checked|--left|--recommend)
+        if [[ $# -lt 2 ]] || ! has_text "$2"; then usage "$1 needs some text after it"; fi
+        into="${1#--}"
+        case "$into" in
+          why)       why="$(part "$2")" ;;
+          checked)   checked="$(part "$2")" ;;
+          left)      left="$(part "$2")" ;;
+          recommend) rec="$(part "$2")" ;;
+        esac
+        shift 2 ;;
+      --option)
+        if [[ $# -lt 3 || "$2" == --* || "$3" == --* ]] || ! has_text "$2" || ! has_text "$3"; then
+          usage "--option takes a label and what follows from choosing it: --option \"<label>\" \"<what follows>\""
+        fi
+        (( n < ${#letters} )) || usage "at most ${#letters} options; ask two questions instead"
+        opts[n]="$(part "$2") => $(part "$3")"
+        n=$((n + 1))
+        into=option
+        shift 3 ;;
+      *)
+        # Text given without quotes comes as several arguments; keep all of it.
+        case "$into" in
+          head)    head="${head:+$head }$(part "$1")" ;;
+          why)     why="$why $(part "$1")" ;;
+          checked) checked="$checked $(part "$1")" ;;
+          left)    left="$left $(part "$1")" ;;
+          *)       usage "'$1' follows --$into, which is already complete; quote each part" ;;
+        esac
+        shift ;;
+    esac
+  done
+  if [[ "$kind" == needs-decision ]]; then
+    has_text "$head" || usage "needs-decision needs the question before its parts"
+    (( n == 0 || n >= 2 )) || usage "one option is not a choice: give at least two, or none for a question with nothing to choose from"
+    if [[ -n "$rec" ]]; then
+      if (( n == 0 )) || [[ ! "$rec" =~ ^[a-f]$ || "${letters:0:n}" != *"$rec"* ]]; then
+        usage "--recommend takes the letter of one of your options (${letters:0:1} is the first --option)"
+      fi
+    fi
+  else
+    has_text "$head" || usage "done needs the result before its parts"
+  fi
+  out="$head"
+  [[ -z "$why" ]] || out="$out ¶ why: $why"
+  i=0
+  while (( i < n )); do
+    out="$out ¶ ${letters:i:1}: ${opts[i]}"
+    i=$((i + 1))
+  done
+  [[ -z "$rec" ]]     || out="$out ¶ recommends: $rec"
+  [[ -z "$checked" ]] || out="$out ¶ checked: $checked"
+  [[ -z "$left" ]]    || out="$out ¶ left: $left"
+  printf '%s' "$out"
+}
+
 contract_text() {
   local meta branch context repo parent context_rule="" existing_rule="" base
   meta="$MCV_HOME/${MCV_TASK%%/*}/tasks/${MCV_TASK#*/}/meta"
@@ -225,9 +315,11 @@ contract_text() {
 You are an mcv worker for task $MCV_TASK. A coordinator session started you and passes your questions to the user.
 
 Report through mcv-status, by its full path:
-  "$SELF" needs-decision "<question>"   when you need the user to choose; it prints the question id
+  "$SELF" needs-decision "<question>" --why "<background>" --option "<label>" "<what follows>" --option "<label>" "<what follows>" --recommend <letter>
+                                        when you need the user to choose; it prints the question id
   "$SELF" blocked "<why>"               when you cannot continue
-  "$SELF" done "<one-line summary>"     when the task is finished
+  "$SELF" done "<result>" --checked "<what you verified>" --left "<what is not done, or waits for the user>"
+                                        when the task is finished
   "$SELF" failed "<reason>"             when you are giving up
   "$SELF" note "<progress>"             for progress worth knowing that needs no answer
   "$SELF" waiting "<what, how long>"    just before you end a turn to wait for background work
@@ -235,7 +327,9 @@ Report through mcv-status, by its full path:
 Rules:
 - Never use the AskUserQuestion tool. Ask through needs-decision instead. This overrides any skill or instruction that tells you to ask the user.
 - After needs-decision, end your turn and wait. The answer arrives as your next prompt.
-- One decision per needs-decision. Two things to decide are two calls, so the user can answer each by its id. Say which option you recommend.
+- One decision per needs-decision. Two things to decide are two calls, so the user can answer each by its id.
+- The user reads your question as a card, each part in its own place, so write the parts short and apart. The question is one short sentence that can be answered without reading anything else. --why holds what the user must know to choose, in two sentences at most; leave it out when the question says enough. Each --option is a label of a few words, then what follows from choosing it; options are lettered a, b, c in the order you give them, and --recommend names the letter you would pick. Leave the options out only when there is nothing to choose from.
+- done is read the same way: the result in one sentence, --checked for what you verified and how, --left for what is not done or waits for the user. Leave out a part that has nothing to say.
 - Each time you end a turn to wait for background work (a sub-agent, a build, a Monitor), run waiting first. A turn that ends with no report reads as a stop, and the coordinator then reads your screen.
 - A note only goes to the coordinator's status table and wakes nobody. Send one at a milestone, not at every step.
 - Work only in this worktree, your current directory. Never touch the repository's main checkout.$context_rule
@@ -574,16 +668,21 @@ case "${1:-}" in
     [[ -n "${MCV_TASK:-}" ]] || usage "MCV_TASK not set; only an mcv worker reports status"
     [[ $# -ge 2 ]] || usage "usage: $1 <text>"
     has_text "${*:2}" || usage "$1 needs some text; say what the user should know"
+    # Text given without quotes comes as several arguments; keep all of it.
+    if [[ "$1" == needs-decision || "$1" == "done" ]]; then
+      text="$(with_parts "$@")" || exit 2
+    else
+      text="${*:2}"
+    fi
     log="$(log_of "$MCV_TASK")" || exit 1
     lock_log "$log"
-    # Text given without quotes comes as several arguments; keep all of it.
     if [[ "$1" == needs-decision ]]; then
       n=1
       [[ -f "$log" ]] && n=$(( $(cut -f2 "$log" | grep -cx needs-decision || true) + 1 ))
-      append "$log" needs-decision "q$n" "${*:2}"
+      append "$log" needs-decision "q$n" "$text"
       printf 'q%d\n' "$n"
     else
-      append "$log" "$1" - "${*:2}"
+      append "$log" "$1" - "$text"
     fi
     ;;
 
