@@ -38,8 +38,8 @@ change; the scripts already take these per call.
 
 ## Trade-offs
 
-- The hub coordinator has no project's CLAUDE.md, skills or memory, the gap ADR 0001 held against
-  firstmate. Project-specific procedures (a planning skill that lives in one project) are not
+- The hub coordinator has no project's CLAUDE.md, skills or memory, the gap
+  [ADR 0001](0001-build-on-herdr.md) set out to avoid. Project-specific procedures (a planning skill that lives in one project) are not
   available there; for such work, the coordinator inside that project remains the right place.
 - One `max_workers` spans every project, which is the point (one machine, one usage budget).
 - An alternative is a hub whose workers are the per-project coordinators. It keeps each project's

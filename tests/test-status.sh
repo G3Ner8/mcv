@@ -292,7 +292,7 @@ expect "--task with MCV_TASK set is refused" '[[ $rc -eq 1 && "$out" == *"only t
 expect "the question stays open" '! cut -f2,3 "$log3" | grep -qx "answered"$'"'"'\t'"'"'"q2"'
 
 # A correction to an answer already sent is recorded as amended, so the log
-# says what the worker was finally told (measured on carsol: a misread "1").
+# says what the worker was finally told (measured in a real run: a misread "1").
 env -u MCV_TASK "$S" --task shop/t3 amended q1 "b: run the cases on Dev, within the scope given"; rc=$?
 expect "amending an answered question succeeds" '[[ $rc -eq 0 ]]' "rc=$rc"
 expect "amended line recorded with its text" \
@@ -306,7 +306,7 @@ MCV_TASK=shop/t3 "$S" --task shop/t3 amended q1 "self" >/dev/null 2>&1; rc=$?
 expect "a worker cannot amend" '[[ $rc -eq 1 ]]' "rc=$rc"
 
 # An order that answers no question, given while the worker is busy, is kept
-# as pending under an order id the script picks (measured on carsol: "push
+# as pending under an order id the script picks (measured in a real run: "push
 # item 1" was refused four times and held only in the coordinator's memory).
 out="$(env -u MCV_TASK "$S" --task shop/t3 pending - "push item 1")"; rc=$?
 expect "pending - queues an order and prints its id o1" '[[ $rc -eq 0 && "$out" == o1 ]]' "rc=$rc $out"

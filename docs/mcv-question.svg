@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 444" role="img" aria-labelledby="t d">
+  <title id="t">The path of a worker's question</title>
+  <desc id="d">A worker writes its question to a status log. A watcher script sees the new line and wakes the coordinator, which asks you. You answer, and the coordinator passes the answer to the worker and notes it in the log.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #14202e; }
+    .display { font-weight: 700; }
+    .muted { fill: #5a6878; }
+    .accent-text { fill: #1b5fd0; font-weight: 600; }
+    .box { fill: #ffffff; stroke: #14202e; stroke-width: 1.5; }
+    .box-lead { fill: #e6eefb; stroke: #1b5fd0; stroke-width: 1.5; }
+    .rule { stroke: #c4ced9; stroke-width: 1; }
+    .out { stroke: #14202e; stroke-width: 1.5; fill: none; }
+    .back { stroke: #1b5fd0; stroke-width: 1.5; fill: none; stroke-dasharray: 6 4; }
+    .head-out { fill: #14202e; }
+    .head-back { fill: #1b5fd0; }
+    .mark { fill: #ffffff; stroke: #14202e; stroke-width: 2; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #18212b; }
+      text { fill: #e8eef5; }
+      .muted { fill: #9aa8b8; }
+      .accent-text { fill: #82acff; }
+      .box { fill: #18212b; stroke: #e8eef5; }
+      .box-lead { fill: #1c2c47; stroke: #82acff; }
+      .rule { stroke: #36434f; }
+      .out { stroke: #e8eef5; }
+      .back { stroke: #82acff; }
+      .head-out { fill: #e8eef5; }
+      .head-back { fill: #82acff; }
+      .mark { fill: #18212b; stroke: #e8eef5; }
+    }
+  </style>
+  <defs>
+    <marker id="head-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="head-out" d="M0 0 L10 5 L0 10 Z"/>
+    </marker>
+    <marker id="head-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="head-back" d="M0 0 L10 5 L0 10 Z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1000" height="444" rx="12"/>
+
+  <rect class="mark" x="40" y="37" width="16" height="16" rx="2"/>
+  <rect class="mark" x="47" y="30" width="16" height="16" rx="2"/>
+  <text class="display" x="76" y="52" font-size="24">mcv</text>
+  <text class="muted" x="40" y="84" font-size="15">How a worker's question reaches you, and how your answer gets back.</text>
+  <line class="rule" x1="40" y1="106" x2="960" y2="106"/>
+
+  <rect class="box" x="40" y="160" width="152" height="84" rx="10"/>
+  <text class="display" x="116" y="198" font-size="15" text-anchor="middle">Worker</text>
+  <text class="muted" x="116" y="219" font-size="11.5" text-anchor="middle">needs a decision</text>
+
+  <rect class="box" x="232" y="160" width="152" height="84" rx="10"/>
+  <text class="display" x="308" y="198" font-size="15" text-anchor="middle">Status log</text>
+  <text class="muted" x="308" y="219" font-size="11.5" text-anchor="middle">a file on your machine</text>
+
+  <rect class="box" x="424" y="160" width="152" height="84" rx="10"/>
+  <text class="display" x="500" y="198" font-size="15" text-anchor="middle">Watcher</text>
+  <text class="muted" x="500" y="219" font-size="11.5" text-anchor="middle">a script that waits</text>
+
+  <rect class="box-lead" x="616" y="160" width="152" height="84" rx="10"/>
+  <text class="display" x="692" y="198" font-size="15" text-anchor="middle">Coordinator</text>
+  <text class="muted" x="692" y="219" font-size="11.5" text-anchor="middle">your one conversation</text>
+
+  <rect class="box" x="808" y="160" width="152" height="84" rx="10"/>
+  <text class="display" x="884" y="198" font-size="15" text-anchor="middle">You</text>
+  <text class="muted" x="884" y="219" font-size="11.5" text-anchor="middle">answer in plain words</text>
+
+  <line class="back" x1="192" y1="190" x2="230" y2="190" marker-end="url(#head-back)"/>
+  <line class="back" x1="384" y1="190" x2="422" y2="190" marker-end="url(#head-back)"/>
+  <line class="back" x1="576" y1="190" x2="614" y2="190" marker-end="url(#head-back)"/>
+  <line class="back" x1="768" y1="190" x2="806" y2="190" marker-end="url(#head-back)"/>
+  <text class="accent-text" x="212" y="144" font-size="11" text-anchor="middle">1 · writes it down</text>
+  <text class="accent-text" x="404" y="144" font-size="11" text-anchor="middle">2 · sees the new line</text>
+  <text class="accent-text" x="596" y="144" font-size="11" text-anchor="middle">3 · wakes</text>
+  <text class="accent-text" x="788" y="144" font-size="11" text-anchor="middle">4 · asks you</text>
+
+  <line class="out" x1="808" y1="220" x2="770" y2="220" marker-end="url(#head-out)"/>
+  <text x="788" y="266" font-size="11" text-anchor="middle">5 · you answer</text>
+  <path class="out" d="M692 244 V292 H116 V246" marker-end="url(#head-out)"/>
+  <text x="404" y="312" font-size="11" text-anchor="middle">6 · passes your answer on, and notes it in the log</text>
+
+  <line class="rule" x1="40" y1="340" x2="960" y2="340"/>
+
+  <text class="display" x="40" y="372" font-size="14">Numbered</text>
+  <text class="muted" x="40" y="396" font-size="12">Questions have numbers, options have</text>
+  <text class="muted" x="40" y="413" font-size="12">letters: a reply cannot mix them up.</text>
+
+  <text class="display" x="360" y="372" font-size="14">Nothing lost</text>
+  <text class="muted" x="360" y="396" font-size="12">If the worker is busy, your answer</text>
+  <text class="muted" x="360" y="413" font-size="12">waits and goes in when it stops.</text>
+
+  <text class="display" x="680" y="372" font-size="14">Yours to answer</text>
+  <text class="muted" x="680" y="396" font-size="12">The coordinator never answers a</text>
+  <text class="muted" x="680" y="413" font-size="12">worker's question for you.</text>
+</svg>

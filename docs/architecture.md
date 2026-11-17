@@ -317,8 +317,9 @@ Measured against herdr 0.9.5 (protocol 22) on macOS, 2026-11-06 and 2026-11-07.
 | `status --json`, `integration status` | `doctor` requires herdr >= 0.9.5 and the Claude integration `current`; updating herdr does not refresh the integration. It also prints mcv's own version, read from `.claude-plugin/plugin.json` beside its copy, which the coordinator shows when it opens: a session keeps the helpers it started with (measured: one ran 0.2.0's after 0.2.2 was installed). |
 | `--settings '{"env": ...}'` | Reaches both the hooks and the Bash tool of the worker. |
 
-Not yet observed: which signal the Monitor tool stops `mcv-watch` with; whether workers survive
-with every herdr window closed.
+| Claude Code's Monitor tool stopping its command (Claude Code 2.1.326, 2026-11-17) | Sends SIGTERM, both when the task is stopped and when `timeout_ms` runs out. A process that traps the signal and carries on is gone within seconds without running its EXIT trap, so the signal is followed by one that cannot be caught. `mcv-watch` exits on SIGTERM and removes its lock on the way out. |
+
+Not yet observed: whether workers survive with every herdr window closed.
 
 ## Known limits
 
@@ -339,7 +340,8 @@ with every herdr window closed.
   idle with one pane; one the user has started using stays open, for a later remove.
 - Anything a new pane's shell asks before its prompt (an update check, a plugin question) breaks
   `agent start`. mcv cannot answer it; the error shows it so the user can turn it off.
-- SIGKILL to `spawn` while herdr creates the worktree can leave that worktree behind.
+- SIGKILL to `spawn` while herdr creates the worktree leaves that worktree and its branch until
+  the task is removed or spawned again; nothing clears them on its own.
 
 ## Next
 
