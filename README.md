@@ -120,17 +120,22 @@ the old conversation left running is replaced by the new one's.
 
 Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
 
-```
-⧉ cart-fix · QUESTION #1
-  web · fix/cart-total
+> **⧉ cart-fix · QUESTION #1** · web · `fix/cart-total`
+>
+> **Add the surcharge per drink, or once per order?**
+>
+> The old code added it once; the till prints it per drink.
+>
+> - **a** ★ per drink → the total matches the receipt
+> - **b** once per order → simpler, but differs from the till
+>
+> The worker recommends **a**
+>
+> Reply `cart-fix #1 a`
 
-  Add the surcharge per drink, or once per order?
-
-  a  per drink, as the till prints it on the receipt      ← recommended
-  b  once per order
-
-  Reply  cart-fix #1 a
-```
+Every card reads the same way: who is asking on the first line, the question alone in bold, the
+options with what follows from each, and on the last line what to type. A finished task comes as
+a card too, saying the result, what the worker checked and what is left for you.
 
 ![The path of a question: the worker writes it to a status log, a watcher sees the new line and wakes the coordinator, which asks you; your answer goes back through the coordinator to the worker](docs/mcv-question.svg)
 

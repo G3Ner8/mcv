@@ -161,5 +161,10 @@ Both sit next to `mcv-herdr.sh`. Run either with no arguments for its usage.
 - `mcv-watch <project>` prints each question and stop as it happens, which is what the
   coordinator sees. `--resume` goes on where the last one stopped, without showing anything
   twice.
+- A worker reports with `mcv-status`, and you can read what it wrote in the task's `status.log`.
+  A question and a result come in parts, each after ` ¶ `:
+  `needs-decision "<question>" --why "<background>" --option "<label>" "<what follows>" ...
+  --recommend <letter>` and `done "<result>" --checked "<text>" --left "<text>"`. The options
+  are lettered `a` to `f` in the order given: two or more, or none.
 - `mcv-status --task <project>/<id> answered q<n> "<why>"` closes a question when nothing is sent
   (you answered in the worker's pane), and `amended` records a correction sent after an answer.

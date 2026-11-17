@@ -135,7 +135,11 @@ files from `.worktreeinclude`), `created` (UTC).
 **status.log** line: `<UTC time>\t<kind>\t<question id or ->\t<text>`, with kind one of
 `needs-decision`, `blocked`, `done`, `failed`, `note`, `waiting` (the worker's), `pending`,
 `answered`, `amended` (the coordinator's). Text has tabs, newlines and other control characters
-removed. Question ids are `q1`, `q2`, ... per task, and order ids `o1`, `o2`, ... A question is
+removed. A `needs-decision` and a `done` hold their parts in that text, each after ` ¶ `: the
+question, `why: ...`, the options `a: <label> => <what follows>` (lettered by `mcv-status`, two
+to six, or none) and `recommends: <letter>`; the result, `checked: ...` and `left: ...`. A `¶`
+in the worker's own words is turned into a space, so a part cannot be faked. The coordinator
+places the parts in a card and cuts nothing. Question ids are `q1`, `q2`, ... per task, and order ids `o1`, `o2`, ... A question is
 open until it has an `answered` line; a `pending` line holds an answer, or an order, the
 coordinator could not send yet (an order's `answered` line records that it was sent); an `amended` line, only
 after `answered`, holds a correction sent later, so the log says what the worker was last told.

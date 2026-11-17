@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.2.11"
+  version: "0.3.0"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -251,12 +251,12 @@ text. Lines that start with `|` under a `WAITING` are the dialog as the worker's
 
 | Event | What to do |
 |---|---|
-| `QUESTION qN · <text>` | Relay it to the user as a question card (below). |
+| `QUESTION qN · <text>` | Relay it to the user as a question card (below). The text holds the question and its parts, each after ` ¶ `. |
 | `BLOCKED · <text>` | The worker says it cannot continue. Tell the user why and ask what to do. |
 | `WAITING` | The worker stopped at a dialog on its screen. The lines under the event that start with `|` are that dialog: describe from them, in plain words, what it wants (which command, which file, which question) and which answers it offers, and ask the user. A long dialog comes as its top and its bottom, with a line between saying how many lines are left out. `read` its screen only when no such lines came or they do not say what is asked. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
 | `RESUMED` | The dialog is gone: the user answered it in the worker's pane. Stop asking them about it; say in one line that the worker went on. |
 | `STOPPED` | The worker's turn ended without a report, or a wait it announced (`waiting` in its log) has lasted past the watcher's limit. This is not "finished". `read` its screen. If it is still waiting on something that is running, say nothing, or one line if the user is waiting on it; if what it waits on has died or hangs, tell the user. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. It does not come for a worker that has reported (a question, `DONE`, `FAILED`, `BLOCKED`) and been sent nothing since: such a turn end, Claude compacting an idle worker say, changes nothing. |
-| `DONE · <text>` | Report the summary. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
+| `DONE · <text>` | Relay it as a result card (below): the result, and after ` ¶ ` what was checked and what is left. Ask whether to remove the worker; do not remove it unasked. Start the next waiting worker, if any. |
 | `FAILED · <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
 | `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 2 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait --answers qN`, which records it; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; send it with `--answers qN` on a yes, or if the user drops it record `mcv-status --task <project>/<id> answered qN "dropped by the user"`. If the output says `queued`, the worker was busy again and the answer is kept once more. A `DELIVER` comes once per pending line. `DELIVER oN · <order>` is an order the user gave while the worker was busy ("Sending an order" below): `read` its screen and send it with `prompt --no-wait --answers oN`, unless what it asked for is already done (then tell the user and record `mcv-status --task <project>/<id> answered oN "already done"`). |
 | `GONE` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
@@ -271,55 +271,97 @@ you know.
 
 Everything mcv shows the user carries the mark `⧉`, so it stands out from the rest of the
 conversation. The body of a message is in the user's language; the mark, the ids, the event words
-and the reply line stay as written here. No boxes or rules drawn around a message: characters
-with combining marks break their alignment.
+and what the user types back stay as written here. No boxes or rules drawn around a message:
+characters with combining marks break their alignment.
 
-**Relaying.** Open each relayed event with its header line, then the details indented by two
-spaces, then a blank line and what the user does: the exact reply to type, where to click, or
-"nothing to do". Events that arrive together go in one message, one block each.
+**Relaying.** Each relayed event is a card with three parts, always in this order:
 
-```
-⧉ cart-fix · QUESTION #1
-  web · fix/cart-total
+1. **The header line,** in bold: the mark, the task and the event, then the repo and the branch,
+   so two workers in the same repo never look alike.
+2. **The body,** each thing in its own place (below).
+3. **The last line: what the user does.** The exact reply to type, in backticks, or where to
+   click, or "nothing to do". Nothing comes after it. Anything else you have to say goes in one
+   line above the cards.
 
-  Add the surcharge per drink, or once per order?
+Write a card as markdown, as the examples below are written, never inside a code block: a code
+block shows no bold and does not wrap a long line. No table in a card: a table needs a header
+row, which comes out as an empty row, and its columns go wrong under Thai (measured). Events that
+arrive together go in one message, one card each, under a first line that counts them
+(`⧉ 2 things wait for you`). The slot names (Result, Checked, Left, Reply, Next, "recommends")
+are in the user's language like the rest of the body.
 
-  a  per drink, as the till prints it on the receipt      ← recommended
-  b  once per order
-
-  Reply  cart-fix #1 a
-```
-
-```
-⧉ cart-fix · WAITING
-  Wants to run: git push -u origin fix/cart-total
-
-  Approve or deny it in the herdr pane "mcv shop/cart-fix". I never approve for you.
-```
+A question's text comes in parts, each after ` ¶ `: the question, then `why: ...`, the options
+`a: <label> => <what follows>`, and `recommends: <letter>`. Place each part as it is:
 
 ```
-⧉ cart-fix · DONE
-  3 files staged · tests pass · commit message drafted
+**⧉ cart-fix · QUESTION #1** · web · `fix/cart-total`
 
-  Next  say "commit" when ready
+**Add the surcharge per drink, or once per order?**
+
+The old code added it once; the till prints it per drink.
+
+- **a** ★ per drink → the total matches the receipt
+- **b** once per order → simpler, but differs from the till
+
+The worker recommends **a**
+
+Reply `cart-fix #1 a`
+```
+
+- The question is the bold line, alone. The `why` part is the paragraph under it; leave the
+  paragraph out when there is no such part.
+- Never shorten, drop, reorder or re-letter an option, and never move the star: the worker
+  answers to the letters it gave. Options are letters, never numbers: numbers are for questions,
+  so `#1 a` cannot be misread.
+- Your own view is at most one clause on the recommendation line ("The worker recommends **a** ·
+  I agree", or "· I would pick **b**: the report already rounds per order"). Say more only when
+  the user asks. A course you propose yourself, after the user asks about a card, is not prose
+  next to it: show the card again with your course as one more letter.
+- A question with no options has nothing to choose from: its last line is "Reply `cart-fix #1`
+  and your answer".
+- A question that came as one paragraph, with no ` ¶ ` (a worker running an older mcv): put its
+  question in bold, the rest under it as it is, and letter the options it names yourself. If it
+  holds two decisions, letter the second one's options on from the first's (`a b` then `c d`)
+  and ask for both: Reply `cart-fix #1 a c`.
+
+A result comes the same way: the result, then `checked: ...` and `left: ...`. Leave out a line
+whose part is missing; a result with neither part is one line under the header.
+
+```
+**⧉ cart-fix · DONE** · web · `fix/cart-total`
+
+- **Result** the cart total adds the surcharge per drink
+- **Checked** unit tests pass; the total compared with the till's receipt
+- **Left** 3 files staged, not committed
+
+Next `cart-fix commit` when you have looked at it
 ```
 
 ```
-⧉ cart-fix · FAILED · spawn
-  Claude did not start. Last lines of its pane:
-    Would you like to update? [Y/n]
-    zsh: command not found: laude
+**⧉ cart-fix · WAITING** · web · `fix/cart-total`
 
-  Cause      the shell asked about an update before claude started
-  Suggested  stop that prompt, then start the worker again
+Wants to run `git push -u origin fix/cart-total`
+
+Next approve or deny it in the herdr pane "⧉ cart-fix · shop". I never approve for you.
 ```
 
-Label questions `<id> #<n>`, with repo and branch on the line under the header, so two workers in
-the same repo never look alike. Options are letters, never numbers: numbers are for questions, so
-`#1 a` cannot be misread. Keep the worker's recommendation and mark it. If a question still holds
-two decisions, letter the second one's options on from the first's (`a b` then `c d`) and ask for
-both: `Reply  cart-fix #1 a c`. A course you propose yourself, after the user asks about a card,
-is not prose next to it: show the card again with your course as one more letter.
+Lines read from a worker's pane are the one thing that goes in a code block, inside the card:
+
+````
+**⧉ cart-fix · FAILED · spawn** · web · `fix/cart-total`
+
+Claude did not start. Last lines of its pane:
+
+```
+Would you like to update? [Y/n]
+zsh: command not found: laude
+```
+
+- **Cause** the shell asked about an update before claude started
+- **Suggested** stop that prompt, then start the worker again
+
+Next say "start cart-fix again" once the prompt is off
+````
 
 **Commands.** Give every helper call a Bash description that starts with `mcv:` and says what it
 does in words: `mcv: start worker cart-fix`, `mcv: send answer to cart-fix #1`, `mcv: read

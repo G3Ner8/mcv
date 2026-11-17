@@ -338,5 +338,83 @@ echo '{}' >"$home/shop/tasks/t4/meta"
 out="$(env -u MCV_TASK "$S" --task shop/t4 pending - "start with the cart" 2>&1)"; rc=$?
 expect "an order for a worker with no log yet is o1" '[[ $rc -eq 0 && "$out" == o1 ]]' "rc=$rc $out"
 
+# A question comes in parts, so the coordinator places them instead of
+# cutting a paragraph down (measured over 49 real questions: 16 lines at the
+# median, the question itself somewhere inside the background). The parts
+# go into the one text field, each after a pilcrow, lettered by the script.
+mkdir -p "$home/shop/tasks/t5"
+echo '{}' >"$home/shop/tasks/t5/meta"
+log5="$home/shop/tasks/t5/status.log"
+text5() { tail -1 "$log5" | cut -f4; }
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Commit item 1 now, or keep it staged?" \
+  --why "Item 2 needs another branch, and a stash is shared between worktrees." \
+  --option "commit item 1 now" "item 2 starts on its own branch" \
+  --option "keep it staged" "I stop here" \
+  --recommend a 2>&1)"; rc=$?
+expect "a question in parts is accepted and numbered" '[[ $rc -eq 0 && "$out" == q1 ]]' "rc=$rc $out"
+want="Commit item 1 now, or keep it staged? ¶ why: Item 2 needs another branch, and a stash is shared between worktrees. ¶ a: commit item 1 now => item 2 starts on its own branch ¶ b: keep it staged => I stop here ¶ recommends: a"
+got="$(text5)"
+expect "its parts are stored in order, lettered" '[[ "$got" == "$want" ]]' "$got"
+expect "a question in parts is still one line of four fields" \
+  '[[ $(wc -l <"$log5") -eq 1 && $(awk -F"\t" "{print NF}" "$log5") -eq 4 ]]' "$(cat "$log5")"
+
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Which port does the staging API use?" 2>&1)"; rc=$?
+got="$(text5)"
+expect "a question with nothing to choose from needs no options" \
+  '[[ $rc -eq 0 && "$out" == q2 && "$got" == "Which port does the staging API use?" ]]' "rc=$rc $out / $got"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision Keep the old route --why it is still linked 2>&1)"; rc=$?
+got="$(text5)"
+expect "words given without quotes are kept, in the question and in a part" \
+  '[[ $rc -eq 0 && "$got" == "Keep the old route ¶ why: it is still linked" ]]' "rc=$rc $got"
+
+before="$(wc -l <"$log5")"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --option "yes" "it goes out today" 2>&1)"; rc=$?
+expect "a single option is refused: it is not a choice" '[[ $rc -eq 2 && "$out" == *"at least two"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --option "yes" --option "no" 2>&1)"; rc=$?
+expect "an option without what follows from it is refused" '[[ $rc -eq 2 && "$out" == *"what follows"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --option "yes" "out today" --option "no" "next week" --recommend c 2>&1)"; rc=$?
+expect "recommending a letter no option has is refused" '[[ $rc -eq 2 && "$out" == *"--recommend"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --recommend a 2>&1)"; rc=$?
+expect "recommending without options is refused" '[[ $rc -eq 2 && "$out" == *"--recommend"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision --why "no question here" 2>&1)"; rc=$?
+expect "parts without a question are refused" '[[ $rc -eq 2 ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --why "   " 2>&1)"; rc=$?
+expect "an empty part is refused" '[[ $rc -eq 2 && "$out" == *"--why"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" note "halfway" --why "x" 2>&1)"; rc=$?
+expect "a kind that has no parts keeps such words as text" \
+  '[[ $rc -eq 0 && "$(text5)" == "halfway --why x" ]]' "rc=$rc $(text5)"
+expect "a refused question writes nothing" '[[ $(wc -l <"$log5") -eq $((before + 1)) ]]' "$(cat "$log5")"
+
+# The mark between parts cannot come from the worker's own words, or a part
+# could be made to look like two.
+MCV_TASK=shop/t5 "$S" needs-decision "Use ¶ here?" --option "yes ¶ b: fake" "fine" --option "no" "also fine" >/dev/null 2>&1
+got="$(text5)"
+expect "a pilcrow in the worker's words is taken out" \
+  '[[ "$got" == "Use   here? ¶ a: yes   b: fake => fine ¶ b: no => also fine" ]]' "$got"
+MCV_TASK=shop/t5 "$S" needs-decision "รวมค่าธรรมเนียมต่อแก้ว หรือต่อออเดอร์?" --option "ต่อแก้ว" "ตรงกับใบเสร็จ" --option "ต่อออเดอร์" "ง่ายกว่า" --recommend a >/dev/null 2>&1
+got="$(text5)"
+expect "Thai parts come through whole" \
+  '[[ "$got" == "รวมค่าธรรมเนียมต่อแก้ว หรือต่อออเดอร์? ¶ a: ต่อแก้ว => ตรงกับใบเสร็จ ¶ b: ต่อออเดอร์ => ง่ายกว่า ¶ recommends: a" ]]' "$got"
+
+# A finished task says what was checked and what is left the same way (150
+# real DONE messages: 13 lines at the median, 38 at the longest).
+out="$(MCV_TASK=shop/t5 "$S" "done" "Opened merge request web!12 into develop" \
+  --checked "tests pass; before and after pages captured" --left "the capture files, until you have seen the pages" 2>&1)"; rc=$?
+got="$(text5)"
+expect "done takes what was checked and what is left" \
+  '[[ $rc -eq 0 && -z "$out" && "$got" == "Opened merge request web!12 into develop ¶ checked: tests pass; before and after pages captured ¶ left: the capture files, until you have seen the pages" ]]' "rc=$rc $out / $got"
+out="$(MCV_TASK=shop/t5 "$S" "done" "Cart total fixed" --option "a" "b" 2>&1)"; rc=$?
+expect "done refuses a part that belongs to a question" '[[ $rc -eq 2 && "$out" == *"--option"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --checked "tests" 2>&1)"; rc=$?
+expect "a question refuses a part that belongs to done" '[[ $rc -eq 2 && "$out" == *"--checked"* ]]' "rc=$rc $out"
+
+c5="$(MCV_TASK=shop/t5 "$S" --contract)"
+ctx5="$(jq -r .hookSpecificOutput.additionalContext <<<"$c5")"
+expect "the contract shows a question's parts" \
+  '[[ "$ctx5" == *"--why"*"--option"*"--recommend"* ]]'
+expect "the contract shows done's parts" '[[ "$ctx5" == *"--checked"*"--left"* ]]'
+expect "the contract asks for the question alone on its line" \
+  '[[ "$ctx5" == *"The question is one short sentence"* ]]'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]
