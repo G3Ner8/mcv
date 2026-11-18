@@ -403,6 +403,20 @@ out="$(MCV_TASK=shop/t5 "$S" "done" "Opened merge request web!12 into develop" \
 got="$(text5)"
 expect "done takes what was checked and what is left" \
   '[[ $rc -eq 0 && -z "$out" && "$got" == "Opened merge request web!12 into develop ¶ checked: tests pass; before and after pages captured ¶ left: the capture files, until you have seen the pages" ]]' "rc=$rc $out / $got"
+# What waits for the user goes apart from what is merely left, lettered, so
+# a decision is not buried in a list of loose ends (a real DONE on pps-web
+# had "lot 55 will hit the size ceiling" among four other "left" items).
+out="$(MCV_TASK=shop/t5 "$S" "done" "Opened merge request web!12" --needs "look at the before and after page" \
+  --needs "open an issue for the old Add Employee bug?" --checked "tests pass" --left "pipeline still running" 2>&1)"; rc=$?
+got="$(text5)"
+expect "done letters each --needs, after the result and before what was checked" \
+  '[[ $rc -eq 0 && -z "$out" && "$got" == "Opened merge request web!12 ¶ needs a: look at the before and after page ¶ needs b: open an issue for the old Add Employee bug? ¶ checked: tests pass ¶ left: pipeline still running" ]]' "rc=$rc $out / $got"
+out="$(MCV_TASK=shop/t5 "$S" "done" "x" --needs 1 --needs 2 --needs 3 --needs 4 --needs 5 --needs 6 --needs 7 2>&1)"; rc=$?
+expect "at most six --needs" '[[ $rc -eq 2 && "$out" == *"--needs"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" "done" "x" --needs "  " 2>&1)"; rc=$?
+expect "an empty --needs is refused" '[[ $rc -eq 2 && "$out" == *"--needs"* ]]' "rc=$rc $out"
+out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --needs "x" 2>&1)"; rc=$?
+expect "a question refuses --needs, which belongs to done" '[[ $rc -eq 2 && "$out" == *"--needs"* ]]' "rc=$rc $out"
 out="$(MCV_TASK=shop/t5 "$S" "done" "Cart total fixed" --option "a" "b" 2>&1)"; rc=$?
 expect "done refuses a part that belongs to a question" '[[ $rc -eq 2 && "$out" == *"--option"* ]]' "rc=$rc $out"
 out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --checked "tests" 2>&1)"; rc=$?
@@ -412,7 +426,9 @@ c5="$(MCV_TASK=shop/t5 "$S" --contract)"
 ctx5="$(jq -r .hookSpecificOutput.additionalContext <<<"$c5")"
 expect "the contract shows a question's parts" \
   '[[ "$ctx5" == *"--why"*"--option"*"--recommend"* ]]'
-expect "the contract shows done's parts" '[[ "$ctx5" == *"--checked"*"--left"* ]]'
+expect "the contract shows done's parts" '[[ "$ctx5" == *"--needs"*"--checked"*"--left"* ]]'
+expect "the contract keeps what waits for the user out of --left" \
+  '[[ "$ctx5" == *"--needs for each thing the user must decide or do"* ]]'
 expect "the contract asks for the question alone on its line" \
   '[[ "$ctx5" == *"The question is one short sentence"* ]]'
 

@@ -17,26 +17,26 @@
 #                                  (state: $MCV_HOME/<project>/watch-state)
 #   mcv-watch <project> --once     one poll, keeping state in MCV_WATCH_STATE (for tests)
 #
-# Printed, one line per event: "⧉ <id> · <EVENT>[ <qid>] · <text>". The mark
+# Printed, one line per event: "⍉ <id> · <EVENT>[ <qid>] · <text>". The mark
 # and the fixed words make mcv's lines easy to find among others in a
 # coordinator's session; the project is the one this watcher was started for.
-#   ⧉ <id> · QUESTION <qid> · <text>   the worker asks the user (needs-decision)
-#   ⧉ <id> · BLOCKED · <text>          the worker reports it cannot go on
-#   ⧉ <id> · DONE · <text>             the worker reports its task finished
-#   ⧉ <id> · FAILED · <text>           the worker reports its task failed
-#   ⧉ <id> · WAITING · ...             it stopped at an approval or question dialog in its pane;
+#   ⍉ <id> · QUESTION <qid> · <text>   the worker asks the user (needs-decision)
+#   ⍉ <id> · BLOCKED · <text>          the worker reports it cannot go on
+#   ⍉ <id> · DONE · <text>             the worker reports its task finished
+#   ⍉ <id> · FAILED · <text>           the worker reports its task failed
+#   ⍉ <id> · WAITING · ...             it stopped at an approval or question dialog in its pane;
 #                                      what the dialog shows follows, one line each
 #                                      marked "  | " (the screen below its last full
 #                                      rule), when it can be read; of a dialog longer
 #                                      than 12 lines, the first 4 and the last 8, with
 #                                      a line between saying how many are left out
-#   ⧉ <id> · RESUMED · ...             it left that dialog and is working again
-#   ⧉ <id> · STOPPED · ...             its turn ended with no report (see below), or a wait
+#   ⍉ <id> · RESUMED · ...             it left that dialog and is working again
+#   ⍉ <id> · STOPPED · ...             its turn ended with no report (see below), or a wait
 #                                      it announced has lasted past the limit: read its screen
-#   ⧉ <id> · DELIVER <qid> · <answer>  an answer or an order (o1, o2, ...) kept as
+#   ⍉ <id> · DELIVER <qid> · <answer>  an answer or an order (o1, o2, ...) kept as
 #                                      pending, now that the worker has stopped:
 #                                      send it, then record it
-#   ⧉ <id> · GONE · ...                the worker's pane is no longer there (not while
+#   ⍉ <id> · GONE · ...                the worker's pane is no longer there (not while
 #                                      spawn is still starting it)
 # A log kind this list does not name is printed in capitals the same way.
 # A text longer than 400 characters goes over several lines, each later one
@@ -151,7 +151,7 @@ emit() {
     *)              label="$(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]')"; text="$f5" ;;
   esac
   local out
-  out="$(say_event "⧉ ${task#*/} · $label" "$text"; [[ -z "$dialog" ]] || printf '%s\n' "$dialog")"
+  out="$(say_event "⍉ ${task#*/} · $label" "$text"; [[ -z "$dialog" ]] || printf '%s\n' "$dialog")"
   # The Monitor tool joins lines that come within 200 ms into one
   # notification and cuts that at about 3000 characters, saying nothing
   # (measured: of two 1500-character questions in one poll, the end of the

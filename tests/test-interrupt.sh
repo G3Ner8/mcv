@@ -70,10 +70,10 @@ wt_of() { git -C "$repo" worktree list --porcelain | awk -v b="branch refs/heads
 kill_in_create() { # <id> <branch>
   FAKE_SLEEP=1 "$H" spawn acme "$1" "$repo" "$2" >/dev/null 2>&1 &
   pid=$!
-  wait_for 'grep -q "begin ⧉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
+  wait_for 'grep -q "begin ⍉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
   kill -9 "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null
-  wait_for 'grep -q "end ⧉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
+  wait_for 'grep -q "end ⍉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
   # A claim is taken over only once its dead holder is two seconds old.
   sleep 2
 }
@@ -115,7 +115,7 @@ expect "remove of a task that never was still says so" '[[ $rc -eq 1 && "$out" =
 # removes the worktree, the branch and the task.
 FAKE_SLEEP=2 "$H" spawn acme k2 "$repo" feat/k2 >/dev/null 2>&1 &
 pid=$!
-wait_for 'grep -q "begin ⧉ k2 · acme" "$FAKE_DIR/order" 2>/dev/null'
+wait_for 'grep -q "begin ⍉ k2 · acme" "$FAKE_DIR/order" 2>/dev/null'
 kill -TERM "$pid"
 wait "$pid"; rc=$?
 expect "TERM during worktree create: exit 143" '[[ $rc -eq 143 ]]' "rc=$rc"

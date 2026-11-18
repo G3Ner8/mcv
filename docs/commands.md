@@ -147,7 +147,7 @@ then says the worker is no longer running Claude. `agents` lists every herdr age
 
 ## Workers in herdr's sidebar
 
-herdr shows each worker's workspace, labelled `⧉ <id> · <project>`, under a workspace for its
+herdr shows each worker's workspace, labelled `⍉ <id> · <project>`, under a workspace for its
 repository's main checkout, and opens that one if you do not have it open. The task comes first
 because the sidebar cuts long labels, after about 12 characters on herdr 0.9.5, so the
 coordinator keeps ids that short when it can. Which workspace herdr takes as the main checkout is
@@ -169,7 +169,9 @@ Both sit next to `mcv-herdr.sh`. Run either with no arguments for its usage.
 - A worker reports with `mcv-status`, and you can read what it wrote in the task's `status.log`.
   A question and a result come in parts, each after ` ¶ `:
   `needs-decision "<question>" --why "<background>" --option "<label>" "<what follows>" ...
-  --recommend <letter>` and `done "<result>" --checked "<text>" --left "<text>"`. The options
-  are lettered `a` to `f` in the order given: two or more, or none.
+  --recommend <letter>` and `done "<result>" --needs "<text>" ... --checked "<text>" --left
+  "<text>"`. The options are lettered `a` to `f` in the order given: two or more, or none. Each
+  `--needs` is one thing the user must decide or do, lettered `a` to `f` the same way (at most
+  six); `--left` is only for what needs nothing from the user.
 - `mcv-status --task <project>/<id> answered q<n> "<why>"` closes a question when nothing is sent
   (you answered in the worker's pane), and `amended` records a correction sent after an answer.

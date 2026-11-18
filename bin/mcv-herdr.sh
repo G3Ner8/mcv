@@ -30,7 +30,7 @@
 #       repository's top folder. The new branch has no upstream until the worker pushes it. One
 #       spawn runs at a time per repository; a second one waits for the
 #       first. herdr chooses the folder, under ~/.herdr/worktrees/, and labels
-#       its workspace "⧉ <id> · <project>". Then start
+#       its workspace "⍉ <id> · <project>". Then start
 #       an idle Claude in it with MCV_TASK=<project>/<id> set. Send it work with `prompt`. Arguments after
 #       `--` go to claude, e.g. -- --permission-mode default; mcv's own
 #       --base and --context there are refused, and so are Claude's
@@ -893,7 +893,7 @@ cmd_spawn() {
   # with the mark the coordinator's events start with. The task id comes
   # first because the sidebar cuts long labels; herdr already shows the
   # workspace under its repository.
-  local label="⧉ $id · $project"
+  local label="⍉ $id · $project"
   NEW_BRANCH="$branch"
   NEW_BRANCH_OWNED="$owned"
   NEW_LABEL="$label"
