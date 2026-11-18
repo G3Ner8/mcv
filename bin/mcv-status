@@ -9,12 +9,14 @@
 #                                      Options are lettered a to f in the order given: two
 #                                      or more, or none; --recommend names one of them
 #   mcv-status blocked <text>          cannot continue
-#   mcv-status done <result> [--checked <text>] [--left <text>]
-#                                      the task is finished: what was verified, and what
-#                                      is not done or waits for the user
+#   mcv-status done <result> [--needs <text>]... [--checked <text>] [--left <text>]
+#                                      the task is finished: each thing the user must
+#                                      decide or do (lettered a to f, at most six), what
+#                                      was verified, and what is not done
 # The parts go into the event's text after the question or the result, each
 # after " ¶ ": "why: ...", "a: <label> => <what follows>", "recommends: a",
-# "checked: ...", "left: ...". A ¶ in the worker's own words becomes a space.
+# "needs a: ...", "checked: ...", "left: ...". A ¶ in the worker's own words
+# becomes a space.
 #   mcv-status failed <text>           giving up, with the reason
 #   mcv-status note <text>             progress worth knowing; needs no answer and
 #                                      wakes nobody (status table only)
@@ -220,17 +222,24 @@ part() {
 # hard-to-read card.
 with_parts() {
   local kind="$1" head="" why="" checked="" left="" rec="" into=head out
-  local n=0 i letters=abcdef
-  local -a opts=()
+  local n=0 i letters=abcdef nn=0
+  local -a opts=() needs=()
   shift
   while (( $# > 0 )); do
     case "$1" in
       --why|--recommend|--option)
         [[ "$kind" == needs-decision ]] || usage "$1 belongs to needs-decision, not to $kind" ;;
-      --checked|--left)
+      --checked|--left|--needs)
         [[ "$kind" == "done" ]] || usage "$1 belongs to done, not to $kind" ;;
     esac
     case "$1" in
+      --needs)
+        if [[ $# -lt 2 ]] || ! has_text "$2"; then usage "--needs needs some text after it"; fi
+        (( nn < ${#letters} )) || usage "at most ${#letters} --needs; put the rest in --left"
+        needs[nn]="$(part "$2")"
+        nn=$((nn + 1))
+        into=needs
+        shift 2 ;;
       --why|--checked|--left|--recommend)
         if [[ $# -lt 2 ]] || ! has_text "$2"; then usage "$1 needs some text after it"; fi
         into="${1#--}"
@@ -281,6 +290,11 @@ with_parts() {
     i=$((i + 1))
   done
   [[ -z "$rec" ]]     || out="$out ¶ recommends: $rec"
+  i=0
+  while (( i < nn )); do
+    out="$out ¶ needs ${letters:i:1}: ${needs[i]}"
+    i=$((i + 1))
+  done
   [[ -z "$checked" ]] || out="$out ¶ checked: $checked"
   [[ -z "$left" ]]    || out="$out ¶ left: $left"
   printf '%s' "$out"
@@ -318,7 +332,7 @@ Report through mcv-status, by its full path:
   "$SELF" needs-decision "<question>" --why "<background>" --option "<label>" "<what follows>" --option "<label>" "<what follows>" --recommend <letter>
                                         when you need the user to choose; it prints the question id
   "$SELF" blocked "<why>"               when you cannot continue
-  "$SELF" done "<result>" --checked "<what you verified>" --left "<what is not done, or waits for the user>"
+  "$SELF" done "<result>" --needs "<a thing the user must decide or do>" --checked "<what you verified>" --left "<what is not done>"
                                         when the task is finished
   "$SELF" failed "<reason>"             when you are giving up
   "$SELF" note "<progress>"             for progress worth knowing that needs no answer
@@ -329,7 +343,7 @@ Rules:
 - After needs-decision, end your turn and wait. The answer arrives as your next prompt.
 - One decision per needs-decision. Two things to decide are two calls, so the user can answer each by its id.
 - The user reads your question as a card, each part in its own place, so write the parts short and apart. The question is one short sentence that can be answered without reading anything else. --why holds what the user must know to choose, in two sentences at most; leave it out when the question says enough. Each --option is a label of a few words, then what follows from choosing it; options are lettered a, b, c in the order you give them, and --recommend names the letter you would pick. Leave the options out only when there is nothing to choose from.
-- done is read the same way: the result in one sentence, --checked for what you verified and how, --left for what is not done or waits for the user. Leave out a part that has nothing to say.
+- done is read the same way: the result in one sentence; --needs for each thing the user must decide or do (look at a page, choose whether to file an issue, settle a risk you found), one --needs each, at most six, each a short sentence; --checked for what you verified, in one sentence; --left for what is not done and needs nothing from the user. Something the user must act on goes in --needs, never in --left, where it would be read as a loose end. Leave out a part that has nothing to say.
 - Each time you end a turn to wait for background work (a sub-agent, a build, a Monitor), run waiting first. A turn that ends with no report reads as a stop, and the coordinator then reads your screen.
 - A note only goes to the coordinator's status table and wakes nobody. Send one at a milestone, not at every step.
 - Work only in this worktree, your current directory. Never touch the repository's main checkout.$context_rule

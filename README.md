@@ -107,8 +107,10 @@ the config does not start a worker. Questions arrive labelled by task, for examp
 approves a worker's dialog for you.
 
 Each session opens with one line naming the version it runs, for example
-`⧉ mcv 0.2.4 · brewly · herdr 0.9.5 · 0 workers`. A session keeps the version it started with:
-after `/plugin marketplace update mcv`, start a new session to use the new one.
+`⍉ mcv 0.3.2 · brewly · herdr 0.9.5 · 0 workers`. A session keeps the version it started with:
+after `/plugin marketplace update mcv`, start a new session, or `/clear` and type `/mcv` again,
+to use the new one. Workers started after the update get the new version at once, so until then
+the coordinator shows their reports the old way (seen on a real project, the day 0.3.0 came out).
 
 Run mcv in a session of its own. Every event a worker sends makes the coordinator read its whole
 conversation again, so what it costs follows the size of that conversation, not the number of
@@ -120,24 +122,36 @@ of work, once every worker is removed, no question is open and nothing waits in 
 disk, but the queue and the questions already shown live only in the conversation. The watcher
 the old conversation left running is replaced by the new one's.
 
-Everything mcv shows you starts with `⧉`, so it stands out in a busy session:
+Every message mcv shows you starts with the line `⍉ mcv`, so it stands out in a busy session:
 
-> **⧉ cart-fix · QUESTION #1** · web · `fix/cart-total`
+> ⍉ **mcv** · 2 things wait for you
+>
+> **?** **cart-fix #1** · `web:fix/cart-total`
 >
 > **Add the surcharge per drink, or once per order?**
->
-> The old code added it once; the till prints it per drink.
 >
 > - **a** ★ per drink → the total matches the receipt
 > - **b** once per order → simpler, but differs from the till
 >
 > The worker recommends **a**
 >
-> Reply `cart-fix #1 a`
+> ✓ **loyalty-csv** · `api:feat/loyalty-csv`
+>
+> Result: draft merge request api!8, loyalty points export as CSV
+>
+> **Waits for you**
+> - **a** an old bug: points expire a day early; file an issue?
+>
+> Checked: export tests\
+> Left: pipeline still running
+>
+> ▶ `cart-fix #1 a` · `loyalty-csv a yes` or `no`
 
-Every card reads the same way: who is asking on the first line, the question alone in bold, the
-options with what follows from each, and on the last line what to type. A finished task comes as
-a card too, saying the result, what the worker checked and what is left for you.
+Every card reads the same way: a symbol for what happened (`✓` done, **?** a question, `◷` a
+dialog waiting in the worker's pane, `✗` failed), the task and where it works, then the question
+alone in bold or the result in one line, and what waits for you lettered under it. The last line,
+`▶`, says what to type for everything at once. When two or more things wait, a short table on top
+lists them.
 
 ![The path of a question: the worker writes it to a status log, a watcher sees the new line and wakes the coordinator, which asks you; your answer goes back through the coordinator to the worker](docs/mcv-question.svg)
 
@@ -147,8 +161,8 @@ will send and waits for your yes. A worker's progress notes, and the waits it an
 build or a sub-agent runs, do not interrupt you; ask where things stand to see them. Something
 you tell a worker while it is busy ("push it") is queued and goes in when it next stops.
 
-If your terminal font has no `⧉` and shows a box instead, mcv still works; the mark is only
-there to catch the eye.
+The mark `⍉` is in Menlo, which every Mac has, and Claude Code itself does not use it. If your
+terminal shows a box instead, mcv still works; the mark is only there to catch the eye.
 
 ## Run the helper by hand
 

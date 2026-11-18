@@ -4,6 +4,35 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-11-18
+
+### Changed
+
+- What waits for the user after a finished task has a place of its own. Measured on the 17 events
+  a pps-web coordinator relayed with 0.3.0: the card shape held every time (header, repo and
+  branch, slots), but a result ran 8 to 19 lines (14 at the median), and in 5 of 8 the line to
+  act on was not last. A decision sat among the loose ends in `left`: "lot 55 will hit the size
+  ceiling" and a backend bug to report were two of five items there. `mcv-status done` takes
+  `--needs "<text>"` for each thing the user must decide or do (lettered a to f, at most six),
+  stored as `needs a: ...` before `checked` and `left`; the worker's rules say such things never
+  go in `--left`.
+- A relay is one shape: the line `⍉ mcv · <how many things wait>` first, one line of the
+  coordinator's own under it if it has one, a short table when two or more things wait, one card
+  per event led by a status symbol (`✓` done, **?** question, `◷` dialog in the pane, `✗` failed,
+  `·` nothing to do), and a last line `▶` with what to type for all of it. `checked` and `left`
+  are cut to one line each; questions and `needs` items are never cut.
+- The mark is `⍉` instead of `⧉`, in events, the Monitor's name, the opening line and herdr's
+  workspace labels. `⧉` is Claude Code's own sign for lines selected in an IDE (found in its
+  binary), and no monospace font on a default Mac has it (Menlo, SF Mono, Monaco). `⍉` is in
+  Menlo, one cell wide, and not in Claude Code.
+
+### Fixed
+
+- The screenshot that started this was not 0.3.0 failing: that coordinator had loaded the 0.2.10
+  skill an hour before 0.3.0 came out and kept it, while workers it started later already used
+  0.3.0. The README now says to start a new session, or `/clear` and type `/mcv` again, after an
+  update.
+
 ## [0.3.1] - 2026-11-18
 
 ### Fixed

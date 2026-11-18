@@ -55,7 +55,7 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
       the remote is moved up to it (`update-ref` with the old value) and handed to herdr without
       `--base`, since herdr checks out an existing local branch as it is. A failed spawn deletes
       the local branch only if it made it.
-   4. `herdr worktree create`, labelled `⧉ <id> · <project>`; if herdr opened a workspace for the
+   4. `herdr worktree create`, labelled `⍉ <id> · <project>`; if herdr opened a workspace for the
       repository's main checkout with it (none was open before), record its id in
       `.repo-workspaces/<repo key>`. Write meta at once, with the base commit and a `starting`
       marker.
@@ -140,9 +140,11 @@ files from `.worktreeinclude`), `created` (UTC).
 `answered`, `amended` (the coordinator's). Text has tabs, newlines and other control characters
 removed. A `needs-decision` and a `done` hold their parts in that text, each after ` ¶ `: the
 question, `why: ...`, the options `a: <label> => <what follows>` (lettered by `mcv-status`, two
-to six, or none) and `recommends: <letter>`; the result, `checked: ...` and `left: ...`. A `¶`
+to six, or none) and `recommends: <letter>`; the result, `needs a: ...` (each thing the user must
+decide or do, lettered by `mcv-status`, at most six), `checked: ...` and `left: ...`. A `¶`
 in the worker's own words is turned into a space, so a part cannot be faked. The coordinator
-places the parts in a card and cuts nothing. Question ids are `q1`, `q2`, ... per task, and order ids `o1`, `o2`, ... A question is
+places the parts in a card and cuts nothing from a question or a `needs` item; `checked` and
+`left` it may cut to one line each, as the full text stays in the log. Question ids are `q1`, `q2`, ... per task, and order ids `o1`, `o2`, ... A question is
 open until it has an `answered` line; a `pending` line holds an answer, or an order, the
 coordinator could not send yet (an order's `answered` line records that it was sent); an `amended` line, only
 after `answered`, holds a correction sent later, so the log says what the worker was last told.
@@ -184,21 +186,21 @@ The pane identifies the worker: a task removed and spawned again gets a new pane
 
 ## Watcher events
 
-One per line, `⧉ <id> · <EVENT>[ <qid>] · <text>`, so the coordinator and the user can tell mcv's
+One per line, `⍉ <id> · <EVENT>[ <qid>] · <text>`, so the coordinator and the user can tell mcv's
 lines from the rest of a session. `MCV_WATCH_RAW=1` gives the same events tab-separated, as the
 tests read them; the raw kind is in brackets:
 
 ```
-⧉ <id> · QUESTION <qid> · <text>   (needs-decision) a worker's question
-⧉ <id> · BLOCKED · <text>          (blocked) the worker reports it cannot go on
-⧉ <id> · DONE · <text>             (done)
-⧉ <id> · FAILED · <text>           (failed)
-⧉ <id> · WAITING · ...             (state blocked) the worker stopped at a dialog
-⧉ <id> · RESUMED · ...             (state working) it left that dialog: answered in its pane
-⧉ <id> · STOPPED · ...             (state done) a turn ended with no report line since the last event,
+⍉ <id> · QUESTION <qid> · <text>   (needs-decision) a worker's question
+⍉ <id> · BLOCKED · <text>          (blocked) the worker reports it cannot go on
+⍉ <id> · DONE · <text>             (done)
+⍉ <id> · FAILED · <text>           (failed)
+⍉ <id> · WAITING · ...             (state blocked) the worker stopped at a dialog
+⍉ <id> · RESUMED · ...             (state working) it left that dialog: answered in its pane
+⍉ <id> · STOPPED · ...             (state done) a turn ended with no report line since the last event,
                                    or (state done, wait) a wait it announced outlasted the limit
-⧉ <id> · DELIVER <qid> · <answer>  (deliver) a pending answer or order, now that the worker has stopped
-⧉ <id> · GONE · ...                (gone) the worker no longer runs Claude
+⍉ <id> · DELIVER <qid> · <answer>  (deliver) a pending answer or order, now that the worker has stopped
+⍉ <id> · GONE · ...                (gone) the worker no longer runs Claude
 ```
 
 `DELIVER` goes out when the worker stops (reaches done or idle from another state, or ends another

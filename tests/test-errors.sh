@@ -71,7 +71,7 @@ expect "its branch was deleted" 'no_branch fix/partial'
 expect "no task left" 'no_task_left t2'
 out="$(FAKE_FAIL=garbage "$H" spawn acme t3 "$repo" fix/garbage 2>&1)"; rc=$?
 expect "worktree create printing garbage: one line naming the workspace to close" \
-  'one_line && [[ "$out" == *"labelled '"'⧉ t3 · acme'"'"* ]]' "rc=$rc $out"
+  'one_line && [[ "$out" == *"labelled '"'⍉ t3 · acme'"'"* ]]' "rc=$rc $out"
 expect "no task left" 'no_task_left t3'
 
 # prompt and read arguments.
