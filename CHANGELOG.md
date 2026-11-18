@@ -4,6 +4,26 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-11-18
+
+### Fixed
+
+- `/mcv <task>` on a first run now builds the project config before anything else. Reported by a
+  user whose first command carried the task: the coordinator went past the setup, and typing
+  `/mcv` alone set it up. The skill described the setup only for `/mcv` alone, and its
+  pre-conditions said "refuse if any missing" while also saying to build a missing config. Not
+  reproduced here: in two runs each on an empty project, 0.3.0 and 0.3.1 both built the config
+  first, so the wording below is the likely cause, not a proven one. The pre-conditions now run
+  every time, in order;
+  a task given with the command waits until the config is confirmed, then comes up for the
+  user's yes without being typed again. A user who typed `/mcv` has chosen workers, so the
+  coordinator never does that task itself, even a small one.
+- `spawn` refuses a repository path that is not the top folder of its checkout, and names the
+  top folder. git answers for any folder inside a checkout, so a plain folder under a home kept
+  in a dotfiles repository gave the worker a worktree of the whole home, and a subfolder of a
+  repository was silently taken as the repository. The skill counts such a path as a mistake in
+  `.claude/mcv.json`, and proposes this folder as a repo only when it is a repository's top.
+
 ## [0.3.0] - 2026-11-17
 
 ### Changed

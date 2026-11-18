@@ -24,7 +24,10 @@
 #       origin, or of the only remote when none is called origin, e.g.
 #       origin/main; a repository with no remote uses its current HEAD;
 #       several remotes and no origin need --base). A bare repository is
-#       refused. The new branch has no upstream until the worker pushes it. One
+#       refused, and so is a <repo-path> that is not the top folder of its
+#       checkout (a subfolder of it, or a plain folder inside another
+#       repository, such as a home folder kept in git); the error names the
+#       repository's top folder. The new branch has no upstream until the worker pushes it. One
 #       spawn runs at a time per repository; a second one waits for the
 #       first. herdr chooses the folder, under ~/.herdr/worktrees/, and labels
 #       its workspace "⧉ <id> · <project>". Then start
@@ -618,11 +621,18 @@ branch_clash() {
 
 # The top folder of the checkout at $1. A bare repository has none, and
 # git's own refusal ("not a git repository") would send the user looking in
-# the wrong place.
+# the wrong place. $1 must be that top folder itself: git answers for any
+# folder inside a checkout, so a plain folder under a home kept in a dotfiles
+# repository would otherwise give the worker a worktree of the whole home.
+# Compared by -ef, as git prints the path with symlinks resolved.
 repo_root() {
+  local top
   [[ "$(git -C "$1" rev-parse --is-bare-repository 2>/dev/null)" != true ]] \
     || die "$1 is a bare repository, with no files to work on; give a checkout of it"
-  git -C "$1" rev-parse --show-toplevel 2>/dev/null || die "not a git repository: $1"
+  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository: $1"
+  [[ "$top" -ef "$1" ]] \
+    || die "$1 is not a repository's top folder but a folder inside the repository $top; give the repository's top folder"
+  printf '%s\n' "$top"
 }
 
 # Remove a worktree herdr just created, and the task folder written for it,

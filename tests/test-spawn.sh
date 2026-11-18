@@ -201,6 +201,21 @@ expect "--add-dir later in the claude args refused" '[[ $rc -eq 1 && "$out" == *
 out="$(spawn n6 "$root/origin.git" fix/n6 2>&1)"; rc=$?
 expect "a bare repository is refused as bare" '[[ $rc -eq 1 && "$out" == *bare* ]] && one_line' "rc=$rc $out"
 
+# A folder that is not a repository but sits inside one (a home folder kept
+# in a dotfiles repository, say) must not give the worker a worktree of the
+# whole outer repository. The same goes for a subfolder of the repository.
+git init -q -b main "$root/dotfiles"
+git -C "$root/dotfiles" commit -q --allow-empty -m init
+mkdir -p "$root/dotfiles/ops" "$repo/sub"
+out="$(spawn n8 "$root/dotfiles/ops" fix/n8 2>&1)"; rc=$?
+expect "a plain folder inside another repository is refused, naming that repository" \
+  '[[ $rc -eq 1 && "$out" == *"inside the repository "*"/dotfiles;"* ]] && one_line' "rc=$rc $out"
+out="$(spawn n9 "$repo/sub" fix/n9 2>&1)"; rc=$?
+expect "a subfolder of the repository is refused, naming its top folder" \
+  '[[ $rc -eq 1 && "$out" == *"inside the repository "*"/repo;"* ]] && one_line' "rc=$rc $out"
+expect "neither made a branch" \
+  '! git -C "$root/dotfiles" show-ref --verify --quiet refs/heads/fix/n8 && ! git -C "$repo" show-ref --verify --quiet refs/heads/fix/n9'
+
 # A context path with glob characters would make the deny rule a pattern
 # that misses the folder itself.
 mkdir -p "$root/ctx [1]"

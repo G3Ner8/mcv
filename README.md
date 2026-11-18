@@ -59,7 +59,9 @@ This repository is its own marketplace. While it is private, the machine needs g
 
 In a Claude Code session started inside a herdr pane, in your project's folder, type `/mcv` (the
 slash menu shows it as `/mcv:mcv`). The first time, the coordinator checks herdr, proposes a project
-config, and writes `.claude/mcv.json` once you agree. The examples in this README follow one
+config, and writes `.claude/mcv.json` once you agree. This happens even when you type the work
+straight after the command (`/mcv fix the cart total`): the work waits for the config, then
+comes up for your yes without your typing it again. The examples in this README follow one
 made-up project, Brewly, a coffee shop's ordering system: a folder `~/code/brewly` with its own
 `CLAUDE.md` and `plans/`, holding three repositories, `web` (the customer ordering site), `api`
 (orders and menu) and `staff` (the baristas' order queue). Started in `~/code/brewly`, the
