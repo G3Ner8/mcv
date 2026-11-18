@@ -45,6 +45,11 @@ from the folder you run the helper in).
 `spawn <project> <id> <repo> <branch>` makes a worktree on a new branch and starts an idle Claude
 in it.
 
+- **The repository** is given by its top folder. A subfolder of it is refused, and so is a plain
+  folder that sits inside another repository (a home folder kept in a dotfiles repository, say),
+  which would otherwise give the worker a worktree of that whole repository. The error names
+  the top folder git found. A bare repository is refused too.
+
 - **The branch name** must not exist yet, locally, on a remote or as a tag. `main`, `master`,
   `develop` and a remote's own name (`origin`) are always refused, and so is a name one folder
   above or below an existing branch (`main/x`, or `feat` while `feat/x` exists). Names are

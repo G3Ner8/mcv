@@ -10,7 +10,7 @@
       "name": "mcv",
       "source": "./",
       "description": "Early: in daily use on two projects, by one person. Run several Claude Code sessions on one project while you talk to one: a coordinator session starts worker sessions, each in its own git worktree, and passes their questions and results to you. Requires the herdr terminal manager.",
-      "version": "0.3.0"
+      "version": "0.3.1"
     }
   ]
 }

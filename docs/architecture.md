@@ -42,7 +42,10 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
 2. **Spawn** (`mcv-herdr.sh spawn`), in this order:
    1. Validate names; claim the worker name (`$MCV_HOME/.claims/<name>`), so no second spawn of it
       or of a name that joins the same can run; clear a task folder that has no meta.
-   2. Refuse an existing branch, locally or on a remote, ignoring case, and `main`/`master`/`develop`.
+   2. Refuse a repository path that is not the top folder of its checkout (git answers for any
+      folder inside one, so a plain folder under a home kept in git would otherwise resolve to
+      the whole home), and a bare repository.
+      Refuse an existing branch, locally or on a remote, ignoring case, and `main`/`master`/`develop`.
       With `--existing`, the reverse: the branch must be on the remote (checked after the fetch).
    3. Lock the repository (`$MCV_HOME/.locks/<repo key>`), fetch, resolve the base (`--base`, else
       the default branch of `origin` or of the only remote, else HEAD when there is no remote).

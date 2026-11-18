@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.3.0"
+  version: "0.3.1"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -29,7 +29,16 @@ Skip this skill for:
 - A single task the user wants done here and now: do it in this session.
 - Work whose steps need each other's results as they run: use subagents inside one session.
 
-## Pre-conditions (refuse if any missing)
+These are for deciding whether to load the skill yourself. A user who typed `/mcv`, with a task
+or without, has chosen workers: never do that task in this session instead, even when it is one
+small task.
+
+## Pre-conditions (every time, before any task)
+
+Run them in this order whether the user typed `/mcv` alone or `/mcv <task>`. A task that came with
+the command waits until all of them hold, the config confirmed included; then it goes to
+Dispatching as the user gave it, without asking for it again. Where herdr is not ready (2), stop
+there; where the config is missing (3), build it with the user first.
 
 1. **Find the helpers.** This skill was loaded with a line "Base directory for this skill: <path>".
    The helpers are in `<path>/../../bin/`; call that folder `BIN` below and always use full paths.
@@ -65,12 +74,16 @@ Skip this skill for:
    - a repo value that is neither a string nor an object with a string `path`;
    - a `base` or `context` that is not a string, or a `max_workers` that is not a whole number
      above 0;
-   - a `context` inside a repo that is not the repo itself (`spawn` refuses it).
+   - a `context` inside a repo that is not the repo itself (`spawn` refuses it);
+   - a repo path that is not the top folder of a git checkout: a subfolder of one, or a plain
+     folder inside another repository such as a home folder kept in git (`spawn` refuses it and
+     names the top folder).
 
    Building it, one field at a time:
    - `project`: from the folder name, lowercase, letters, digits and `-` only, at most 12
      characters (it prefixes every worker name, and herdr allows 32 in all).
-   - `repos`: this folder if it is a git repository, plus every subfolder that is a git repository
+   - `repos`: this folder if it is the top folder of a git repository (`git rev-parse
+     --show-toplevel` gives this folder back, not a folder above it), plus every subfolder that is a git repository
      with its own `.claude/` folder; list other git subfolders as "not included" so the user can add
      them. When this folder is a repository that only holds the others (plans, docs), say so and
      propose leaving it out.
@@ -150,8 +163,10 @@ same version.
 
 ### Dispatching work
 
-The user names the work. If they started this skill without a task (`/mcv` alone), set up what
-the pre-conditions need, then ask what the workers should do. Never pick tasks yourself from a
+The user names the work, with the command (`/mcv <task>`) or after it. Either way the
+pre-conditions above come first: a task given with the command on a first run waits while the
+config is built and confirmed, then starts at step 1 below. Started without a task (`/mcv`
+alone), ask what the workers should do once the pre-conditions hold. Never pick tasks yourself from a
 plan, a queue, a lots file or a tracker, even one that looks ready: you may say what you see
 there, in one line, but the user chooses.
 
