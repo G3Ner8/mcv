@@ -70,10 +70,10 @@ wt_of() { git -C "$repo" worktree list --porcelain | awk -v b="branch refs/heads
 kill_in_create() { # <id> <branch>
   FAKE_SLEEP=1 "$H" spawn acme "$1" "$repo" "$2" >/dev/null 2>&1 &
   pid=$!
-  wait_for 'grep -q "begin ⍉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
+  wait_for 'grep -q "begin '"$1"' · mcv acme" "$FAKE_DIR/order" 2>/dev/null'
   kill -9 "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null
-  wait_for 'grep -q "end ⍉ '"$1"' · acme" "$FAKE_DIR/order" 2>/dev/null'
+  wait_for 'grep -q "end '"$1"' · mcv acme" "$FAKE_DIR/order" 2>/dev/null'
   # A claim is taken over only once its dead holder is two seconds old.
   sleep 2
 }
@@ -110,12 +110,24 @@ expect "leftover branch with a commit of its own: worktree removed, branch kept"
 out="$("$H" remove acme/c1 2>&1)"; rc=$?
 expect "remove of a task that never was still says so" '[[ $rc -eq 1 && "$out" == *"no task"* ]]' "rc=$rc $out"
 
+# Two projects may use the same task id (lots numbered the same way). The
+# cleanup of one project's interrupted spawn finds its workspace by label,
+# so it must not find, and close, the other project's running worker.
+out="$("$H" spawn other c4 "$repo" feat/other-c4 2>&1)"; rc=$?
+expect "another project's task c4 starts" '[[ $rc -eq 0 ]]' "rc=$rc $out"
+other_ws="$(jq -r .workspace_id "$MCV_HOME/other/tasks/c4/meta" 2>/dev/null)"
+kill_in_create c4 feat/c4
+out="$("$H" remove acme/c4 2>&1)"; rc=$?
+expect "the same id in another project: its workspace survives this project's cleanup" \
+  '[[ $rc -eq 0 ]] && herdr workspace list | jq -e --arg w "$other_ws" ".result.workspaces[] | select(.workspace_id == \$w)" >/dev/null' \
+  "rc=$rc other=$other_ws $out"
+
 # Stopped with TERM while herdr creates the worktree: herdr finishes, the
 # spawn then exits before reading its answer; cleanup still finds and
 # removes the worktree, the branch and the task.
 FAKE_SLEEP=2 "$H" spawn acme k2 "$repo" feat/k2 >/dev/null 2>&1 &
 pid=$!
-wait_for 'grep -q "begin ⍉ k2 · acme" "$FAKE_DIR/order" 2>/dev/null'
+wait_for 'grep -q "begin k2 · mcv acme" "$FAKE_DIR/order" 2>/dev/null'
 kill -TERM "$pid"
 wait "$pid"; rc=$?
 expect "TERM during worktree create: exit 143" '[[ $rc -eq 143 ]]' "rc=$rc"

@@ -147,7 +147,7 @@ then says the worker is no longer running Claude. `agents` lists every herdr age
 
 ## Workers in herdr's sidebar
 
-herdr shows each worker's workspace, labelled `⍉ <id> · <project>`, under a workspace for its
+herdr shows each worker's workspace, labelled `<id> · mcv <project>`, under a workspace for its
 repository's main checkout, and opens that one if you do not have it open. The task comes first
 because the sidebar cuts long labels, after about 12 characters on herdr 0.9.5, so the
 coordinator keeps ids that short when it can. Which workspace herdr takes as the main checkout is

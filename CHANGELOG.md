@@ -4,6 +4,28 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-11-20
+
+### Changed
+
+- mcv marks what it shows with the word `mcv` instead of a symbol: `mcv <id> · <EVENT> · <text>`
+  for events, `mcv · <project>` for the Monitor, and **`mcv`** (bold inside a code span, which
+  Claude Code shows bold and coloured at once) for the opening line and the first line of a relay.
+  Seen on pps-web with 0.3.2: herdr's sidebar and Claude Code put a round dot before the line, so
+  `⍉` read as two circles, and at the terminal's size its detail was lost. `❐`, tried next, lost
+  its shadow in Menlo and read as a plain box. The user chose the word over every symbol.
+- herdr's workspace label is `<id> · mcv <project>`: the id first, as the sidebar shows about 12
+  characters. The project stays, past what the sidebar shows, because a cleanup finds the
+  workspace of an interrupted spawn by its label and two projects may use the same task id; a new
+  check in `test-interrupt.sh` covers it.
+
+### Fixed
+
+- The `▶` line names every letter. Seen: `▶ lot55-714 #1 a · #2 a or b · #3 a or b or c`, and the
+  user could not tell what any letter meant without scrolling back. Each letter now carries a
+  label of two to four words and `★` on the worker's pick; with more than one thing to answer,
+  `▶` becomes a heading with one line per question or item and a reply to type as it is.
+
 ## [0.3.2] - 2026-11-18
 
 ### Changed

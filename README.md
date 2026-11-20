@@ -107,7 +107,7 @@ the config does not start a worker. Questions arrive labelled by task, for examp
 approves a worker's dialog for you.
 
 Each session opens with one line naming the version it runs, for example
-`⍉ mcv 0.3.2 · brewly · herdr 0.9.5 · 0 workers`. A session keeps the version it started with:
+**`mcv`** `0.3.3 · brewly · herdr 0.9.5 · 0 workers`. A session keeps the version it started with:
 after `/plugin marketplace update mcv`, start a new session, or `/clear` and type `/mcv` again,
 to use the new one. Workers started after the update get the new version at once, so until then
 the coordinator shows their reports the old way (seen on a real project, the day 0.3.0 came out).
@@ -122,9 +122,10 @@ of work, once every worker is removed, no question is open and nothing waits in 
 disk, but the queue and the questions already shown live only in the conversation. The watcher
 the old conversation left running is replaced by the new one's.
 
-Every message mcv shows you starts with the line `⍉ mcv`, so it stands out in a busy session:
+Every message mcv shows you starts with the word **`mcv`**, bold and in the code colour, so it
+stands out in a busy session:
 
-> ⍉ **mcv** · 2 things wait for you
+> **`mcv`** · 2 things wait for you
 >
 > **?** **cart-fix #1** · `web:fix/cart-total`
 >
@@ -145,13 +146,18 @@ Every message mcv shows you starts with the line `⍉ mcv`, so it stands out in 
 > Checked: export tests\
 > Left: pipeline still running
 >
-> ▶ `cart-fix #1 a` · `loyalty-csv a yes` or `no`
+> ▶ answer 2
+> - **cart-fix #1** surcharge: `a` per drink ★ · `b` per order
+> - **loyalty-csv a** old bug, file an issue: `yes` · `no`
+>
+> type e.g. `cart-fix #1 a` · `loyalty-csv a yes`
 
 Every card reads the same way: a symbol for what happened (`✓` done, **?** a question, `◷` a
 dialog waiting in the worker's pane, `✗` failed), the task and where it works, then the question
-alone in bold or the result in one line, and what waits for you lettered under it. The last line,
-`▶`, says what to type for everything at once. When two or more things wait, a short table on top
-lists them.
+alone in bold or the result in one line, and what waits for you lettered under it. `▶` comes last
+and lists everything you can answer, each letter with a few words saying what it is and `★` on
+the worker's pick, then a reply you can type as it is. When two or more things wait, a short
+table on top lists them.
 
 ![The path of a question: the worker writes it to a status log, a watcher sees the new line and wakes the coordinator, which asks you; your answer goes back through the coordinator to the worker](docs/mcv-question.svg)
 
@@ -161,8 +167,8 @@ will send and waits for your yes. A worker's progress notes, and the waits it an
 build or a sub-agent runs, do not interrupt you; ask where things stand to see them. Something
 you tell a worker while it is busy ("push it") is queued and goes in when it next stops.
 
-The mark `⍉` is in Menlo, which every Mac has, and Claude Code itself does not use it. If your
-terminal shows a box instead, mcv still works; the mark is only there to catch the eye.
+mcv uses the word, not a symbol: a symbol sat after the round dot Claude Code and herdr put before
+a line, and at the terminal's size it was too small to tell apart.
 
 ## Run the helper by hand
 

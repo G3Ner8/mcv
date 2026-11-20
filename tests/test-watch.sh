@@ -681,29 +681,29 @@ say v note "halfway"
 say v "done" "web!221 opened, not merged"
 out="$(poll)"
 expect "readable: a question carries its id" \
-  '[[ "$(sed -n 1p <<<"$out")" == "⍉ v · QUESTION q1 · Session or query string?" ]]' "$out"
+  '[[ "$(sed -n 1p <<<"$out")" == "mcvv · QUESTION q1 · Session or query string?" ]]' "$out"
 expect "readable: no note" '[[ "$out" != *halfway* ]]' "$out"
-expect "readable: done" '[[ "$(sed -n 2p <<<"$out")" == "⍉ v · DONE · web!221 opened, not merged" ]]' "$out"
+expect "readable: done" '[[ "$(sed -n 2p <<<"$out")" == "mcvv · DONE · web!221 opened, not merged" ]]' "$out"
 agents "w:p8,blocked,2,acme-v"
 out="$(poll)"
-expect "readable: a dialog is WAITING" '[[ "$out" == "⍉ v · WAITING · a dialog is open in its pane" ]]' "$out"
+expect "readable: a dialog is WAITING" '[[ "$out" == "mcvv · WAITING · a dialog is open in its pane" ]]' "$out"
 agents "w:p8,working,3,acme-v"
 out="$(poll)"
-expect "readable: leaving it is RESUMED" '[[ "$out" == "⍉ v · RESUMED · "* ]]' "$out"
+expect "readable: leaving it is RESUMED" '[[ "$out" == "mcvv · RESUMED · "* ]]' "$out"
 sent 2999-01-01T00:00:00Z v
 agents "w:p8,done,4,acme-v"
 out="$(poll)"
 expect "readable: a turn end with no report is STOPPED, telling to read the screen" \
-  '[[ "$out" == "⍉ v · STOPPED · "*"read its screen" ]]' "$out"
+  '[[ "$out" == "mcvv · STOPPED · "*"read its screen" ]]' "$out"
 "$STATUS" --task acme/v pending q1 "query string" >/dev/null
 agents "w:p8,working,5,acme-v"
 poll >/dev/null
 agents "w:p8,done,6,acme-v"
 out="$(poll)"
-expect "readable: a pending answer is DELIVER with its id" '[[ "$out" == "⍉ v · DELIVER q1 · query string" ]]' "$out"
+expect "readable: a pending answer is DELIVER with its id" '[[ "$out" == "mcvv · DELIVER q1 · query string" ]]' "$out"
 agents ""
 out="$(poll)"
-expect "readable: GONE" '[[ "$out" == "⍉ v · GONE · "* ]]' "$out"
+expect "readable: GONE" '[[ "$out" == "mcvv · GONE · "* ]]' "$out"
 
 # The Monitor tool cuts a line at about 500 characters and a notification
 # at about 3000 (measured: 400 arrived whole, 600 was cut; seven lines of
@@ -715,7 +715,7 @@ rm -rf "$MCV_HOME/acme/tasks" "$MCV_WATCH_STATE"/acme
 task x w:p20
 agents "w:p20,working,1,acme-x"
 poll >/dev/null
-pieces() { sed -e '1s/^⍉ x · [A-Z]* [a-z0-9]* · //' -e '2,$s/^  …//' <<<"$1" | tr -d '\n'; }   # the text back
+pieces() { sed -e '1s/^mcvx · [A-Z]* [a-z0-9]* · //' -e '2,$s/^  …//' <<<"$1" | tr -d '\n'; }   # the text back
 longest() { jq -Rn '[inputs | length] | max' <<<"$1"; }
 long="$(printf 'Keep the server message on the page as an alert, or the self-closing toast? %.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13)"
 long="${long% }"
@@ -724,7 +724,7 @@ out="$(poll)"
 expect "a long question comes over several lines, none past 450 characters" \
   '[[ $(count "$out") -ge 3 && $(longest "$out") -le 450 ]]' "lines=$(count "$out") longest=$(longest "$out")"
 expect "its first line is the usual header, the others are marked as continuations" \
-  '[[ "$(sed -n 1p <<<"$out")" == "⍉ x · QUESTION q1 · Keep the server"* ]] && ! sed 1d <<<"$out" | grep -qv "^  …"' "$out"
+  '[[ "$(sed -n 1p <<<"$out")" == "mcvx · QUESTION q1 · Keep the server"* ]] && ! sed 1d <<<"$out" | grep -qv "^  …"' "$out"
 expect "joined, the lines give the question back" '[[ "$(pieces "$out")" == "$long" ]]' "$(pieces "$out")"
 thai="$(printf 'กรอบสองชั้นใน Authority Setting วัดแล้วมีกรอบจริงหรือเป็นของหน้าเทียบ %.0s' 1 2 3 4 5 6 7 8 9 10 11 12)"
 thai="${thai% }"
@@ -735,7 +735,7 @@ expect "Thai text is cut between characters and comes back whole" \
   "lines=$(count "$out") longest=$(longest "$out")"
 say x needs-decision "Session or query string?"
 out="$(poll)"
-expect "a short text stays on one line" '[[ "$out" == "⍉ x · QUESTION q3 · Session or query string?" ]]' "$out"
+expect "a short text stays on one line" '[[ "$out" == "mcvx · QUESTION q3 · Session or query string?" ]]' "$out"
 huge="$(printf 'word%.0s ' $(seq 1 800))"
 say x needs-decision "$huge"
 out="$(poll)"
@@ -769,7 +769,7 @@ EOF
 agents "w:p20,blocked,2,acme-x"
 out="$(STUB_SCREEN="$screen" poll)"
 expect "WAITING carries the dialog as the screen shows it" \
-  '[[ "$(sed -n 1p <<<"$out")" == "⍉ x · WAITING · a dialog is open in its pane:" ]] \
+  '[[ "$(sed -n 1p <<<"$out")" == "mcvx · WAITING · a dialog is open in its pane:" ]] \
    && grep -qxF "  | git push -u origin feat/3.2.2-customer-master-r5 2>&1 | tail -3" <<<"$out" \
    && grep -qxF "  | Do you want to proceed?" <<<"$out" && grep -qxF "  | 1. Yes" <<<"$out"' "$out"
 expect "without the rules, the text above the dialog or the key hints" \
@@ -780,13 +780,13 @@ printf 'no dialog rule on this screen\n' >"$screen"
 agents "w:p20,blocked,4,acme-x"
 out="$(STUB_SCREEN="$screen" poll)"
 expect "a screen with no dialog on it: the plain line, to be read" \
-  '[[ "$out" == "⍉ x · WAITING · a dialog is open in its pane" ]]' "$out"
+  '[[ "$out" == "mcvx · WAITING · a dialog is open in its pane" ]]' "$out"
 agents "w:p20,working,5,acme-x"
 poll >/dev/null
 agents "w:p20,blocked,6,acme-x"
 out="$(poll)"
 expect "a screen that cannot be read: the plain line" \
-  '[[ "$out" == "⍉ x · WAITING · a dialog is open in its pane" ]]' "$out"
+  '[[ "$out" == "mcvx · WAITING · a dialog is open in its pane" ]]' "$out"
 
 # A long dialog keeps both ends: what it is about at the top, and at the
 # bottom why it asks, the question and the answers on offer. Cut from the
