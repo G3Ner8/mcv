@@ -52,7 +52,7 @@ printf '%s\n' "$*" >>"$D/calls"
 
 fail() { printf '{"error":{"code":"%s","message":"%s"}}\n' "$1" "$2" >&2; exit 1; }
 
-# A label such as "⍉ a · acme" as a file name.
+# A label such as "a · mcv" as a file name.
 wsid() { printf 'ws-%s' "$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '-')"; }
 open_main() { # <repo path>
   local p

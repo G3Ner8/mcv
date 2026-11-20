@@ -30,7 +30,7 @@
 #       repository's top folder. The new branch has no upstream until the worker pushes it. One
 #       spawn runs at a time per repository; a second one waits for the
 #       first. herdr chooses the folder, under ~/.herdr/worktrees/, and labels
-#       its workspace "⍉ <id> · <project>". Then start
+#       its workspace "<id> · mcv <project>". Then start
 #       an idle Claude in it with MCV_TASK=<project>/<id> set. Send it work with `prompt`. Arguments after
 #       `--` go to claude, e.g. -- --permission-mode default; mcv's own
 #       --base and --context there are refused, and so are Claude's
@@ -890,10 +890,12 @@ cmd_spawn() {
   # From here on, a branch named $branch was made by this spawn, unless
   # --existing found it already there (then a failure leaves it). The label
   # marks the workspace as mcv's in herdr's sidebar, beside the user's own,
-  # with the mark the coordinator's events start with. The task id comes
-  # first because the sidebar cuts long labels; herdr already shows the
-  # workspace under its repository.
-  local label="⍉ $id · $project"
+  # with the word the coordinator's events start with. The task id comes
+  # first because the sidebar shows only about 12 characters of a label.
+  # The project stays at the end although the sidebar cuts it: the label is
+  # how a cleanup finds the workspace of an interrupted spawn, and two
+  # projects may use the same task id.
+  local label="$id · mcv $project"
   NEW_BRANCH="$branch"
   NEW_BRANCH_OWNED="$owned"
   NEW_LABEL="$label"
