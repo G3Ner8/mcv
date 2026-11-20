@@ -15,6 +15,10 @@
 #       Check that herdr, its server, its Claude integration and jq are ready.
 #       Prints {ok, mcv, herdr, server, integration}; mcv is this copy's version
 #       (from ../.claude-plugin/plugin.json, "unknown" when there is none).
+#       When a newer version is installed beside this copy (Claude Code keeps
+#       each in a folder named after it, and a running session keeps the one
+#       it started with), a field note says so and what to do; spawn's output
+#       carries the same note.
 #   spawn <project> <id> <repo-path> <new-branch> [--base <ref> | --existing] [--context <folder>] [-- <claude-args>...]
 #       Fetch, then create a git worktree of <repo-path> on a branch that must
 #       not exist yet, locally, on a remote or as a tag, in any letter case
@@ -62,7 +66,7 @@
 #       there are denied, and the worker is told it is read-only. Refused: a
 #       folder inside the repository, /, one holding the worktree, and a path
 #       with [ ] * or ? (the deny rule is a pattern).
-#   prompt <project>/<id> <text> [--no-wait] [--timeout <ms>]
+#   prompt <project>/<id> <text> [--answers <id>... | --order] [--no-wait] [--timeout <ms>]
 #       Send text and wait until the worker stops (default 10 minutes). Prints
 #       only the worker's new state; use `read` to see what it said. Refused
 #       with no text (empty, or an option where the text goes), unless the
@@ -80,7 +84,12 @@
 #       (prints "queued": <id>, exit 0), and mcv-watch prints it as a deliver
 #       event when the worker stops. Refused, before anything is sent, for an
 #       id that was never asked or queued, or is answered already. When the
-#       send fails for another reason, nothing is recorded.
+#       send fails for another reason, nothing is recorded. A thing a done
+#       left to the user (needs q<n>) has a question id and is answered the
+#       same way. Given more than once, --answers makes one text answer
+#       several ids in one send (prints them joined by spaces): the first
+#       id's line holds the text and the others say "with <first id>". One
+#       id that cannot take an answer, or an id named twice, refuses it all.
 #       --order: the text is a new order that answers nothing. Sent to a
 #       stopped worker as it is; for a busy one it is queued under a new
 #       order id (prints "queued": o<n>), to be sent later with --answers.
@@ -681,8 +690,30 @@ cmd_doctor() {
   # which install it runs; a session keeps the helpers it started with.
   local mcv
   mcv="$(jq -r '.version // empty' "$(dirname "${BASH_SOURCE[0]}")/../.claude-plugin/plugin.json" 2>/dev/null || true)"
-  jq -cn --arg m "${mcv:-unknown}" --arg c "$client" --arg s "$server_version" \
-    '{ok: true, mcv: $m, herdr: $c, server: $s, integration: "current"}'
+  jq -cn --arg m "${mcv:-unknown}" --arg c "$client" --arg s "$server_version" --arg n "$(newer_note)" \
+    '{ok: true, mcv: $m, herdr: $c, server: $s, integration: "current"} + (if $n == "" then {} else {note: $n} end)'
+}
+
+# Print a sentence when a newer mcv is installed beside this copy, nothing
+# otherwise. Claude Code keeps each installed version in a folder named
+# after it, and a running session keeps the folder it started with, through
+# /clear too, while the workers it starts load the newest. The sentence
+# says what to do, since the session that reads it follows an older skill
+# that knows nothing of it. Only a folder named after its own version is
+# taken for an installed copy; a checkout has no such neighbours.
+newer_note() {
+  local root own d v best=""
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)" || return 0
+  own="$(jq -r '.version // empty' "$root/.claude-plugin/plugin.json" 2>/dev/null || true)"
+  [[ "$own" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "${root##*/}" == "$own" ]] || return 0
+  for d in "${root%/*}"/*/; do
+    d="${d%/}"
+    v="${d##*/}"
+    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && -f "$d/.claude-plugin/plugin.json" ]] || continue
+    if [[ "$v" != "${best:-$own}" ]] && version_ge "$v" "${best:-$own}"; then best="$v"; fi
+  done
+  [[ -z "$best" ]] \
+    || printf 'mcv %s is installed, but this session still runs %s and its skill. Tell the user: quit Claude Code and start it again to use %s (/clear does not switch).' "$best" "$own" "$best"
 }
 
 cmd_spawn() {
@@ -1054,7 +1085,10 @@ cmd_spawn() {
   else
     journal "ok: branch $branch from ${base:-HEAD}, worktree $wt${context:+, context $context}"
   fi
-  jq -c '{task, agent, worktree, branch, base, existing, context, copied}' "$dir/meta"
+  # A worker loads the newest installed mcv; say so when this session runs
+  # an older one, here where the two versions start to work together.
+  jq -c --arg n "$(newer_note)" \
+    '{task, agent, worktree, branch, base, existing, context, copied} + (if $n == "" then {} else {note: $n} end)' "$dir/meta"
 }
 
 cmd_prompt() {
@@ -1078,7 +1112,8 @@ cmd_prompt() {
       --answers)
         [[ $# -ge 2 && "$2" =~ ^[qo][1-9][0-9]*$ ]] \
           || die "--answers needs the id of a question (q1, q2, ...) or of a queued order (o1, o2, ...)"
-        answers="$2"
+        [[ " $answers " != *" $2 "* ]] || die "--answers names $2 twice"
+        answers="${answers:+$answers }$2"
         shift 2 ;;
       --order) order=1; shift ;;
       *) die "unknown option '$1'" ;;
@@ -1096,9 +1131,16 @@ cmd_prompt() {
   # written after a refused send (seen in a real run). The status log stays
   # mcv-status's to write; it is asked first whether the id can take an
   # answer, so that nothing is sent that could not be recorded.
-  local st_bin
+  #
+  # One text may answer several ids (--answers given more than once): it is
+  # sent once. The first id's line holds the text and the others say "with
+  # <first id>", so a queued text comes back from the watcher once, not once
+  # for each id. Every id is checked before anything is sent or written.
+  local st_bin a first=""
   st_bin="$(dirname "${BASH_SOURCE[0]}")/mcv-status"
-  [[ -z "$answers" ]] || "$st_bin" --task "$task" open "$answers" || exit 1
+  for a in $answers; do
+    "$st_bin" --task "$task" open "$a" || exit 1
+  done
   name="$(jfield "$(cat "$d/meta")" .agent)"
   [[ -n "$name" ]] || die "task $task has a damaged meta file ($d/meta)"
   # When Claude exits in its pane, herdr either drops the agent
@@ -1122,7 +1164,10 @@ cmd_prompt() {
       if [[ -n "$order" ]]; then
         kept="$("$st_bin" --task "$task" pending - "$text")" || exit 1
       else
-        "$st_bin" --task "$task" pending "$answers" "$text" || exit 1
+        for a in $answers; do
+          "$st_bin" --task "$task" pending "$a" "${first:+with }${first:-$text}" || exit 1
+          first="${first:-$a}"
+        done
       fi
       journal "ok: worker is $status, nothing sent; kept as pending $kept"
       jq -cn --arg s "$status" --arg k "$kept" '{state: $s, queued: $k}'
@@ -1151,10 +1196,11 @@ cmd_prompt() {
   rm -f "$d/starting"
   status="$(jfield "$HOUT" .result.agent.agent_status)"
   # The text itself is in the worker's transcript; its length is enough here.
-  if [[ -n "$answers" ]]; then
-    "$st_bin" --task "$task" answered "$answers" "$text" \
-      || die "the text was sent to $task, but could not be recorded as answered $answers; record it with mcv-status"
-  fi
+  for a in $answers; do
+    "$st_bin" --task "$task" answered "$a" "${first:+with }${first:-$text}" \
+      || die "the text was sent to $task, but could not be recorded as answered $a; record it with mcv-status"
+    first="${first:-$a}"
+  done
   journal "ok: sent ${#text} characters, state ${status:-unknown}${answers:+, answered $answers}"
   jq -cn --arg s "${status:-unknown}" --arg a "$answers" \
     '{state: $s} + (if $a == "" then {} else {answered: $a} end)'

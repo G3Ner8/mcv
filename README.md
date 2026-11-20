@@ -107,10 +107,12 @@ the config does not start a worker. Questions arrive labelled by task, for examp
 approves a worker's dialog for you.
 
 Each session opens with one line naming the version it runs, for example
-**`mcv`** `0.3.3 · brewly · herdr 0.9.5 · 0 workers`. A session keeps the version it started with:
-after `/plugin marketplace update mcv`, start a new session, or `/clear` and type `/mcv` again,
-to use the new one. Workers started after the update get the new version at once, so until then
-the coordinator shows their reports the old way (seen on a real project, the day 0.3.0 came out).
+**`mcv`** `0.3.4 · brewly · herdr 0.9.5 · 0 workers`. A running Claude Code keeps the version it
+started with: after `/plugin marketplace update mcv`, quit Claude Code and start it again to use
+the new one. `/clear` does not switch (seen: a session stayed on 0.3.2 through `/clear` with
+0.3.3 installed). Workers started after the update get the new version at once, so until then
+the coordinator shows their reports the old way; from 0.3.4 on, the older copy says so itself
+when it starts a worker.
 
 Run mcv in a session of its own. Every event a worker sends makes the coordinator read its whole
 conversation again, so what it costs follows the size of that conversation, not the number of
@@ -141,23 +143,24 @@ stands out in a busy session:
 > Result: draft merge request api!8, loyalty points export as CSV
 >
 > **Waits for you**
-> - **a** an old bug: points expire a day early; file an issue?
+> - **#1** an old bug: points expire a day early; file an issue?
 >
 > Checked: export tests\
 > Left: pipeline still running
 >
 > ▶ answer 2
 > - **cart-fix #1** surcharge: `a` per drink ★ · `b` per order
-> - **loyalty-csv a** old bug, file an issue: `yes` · `no`
+> - **loyalty-csv #1** old bug, file an issue: `yes` · `no`
 >
-> type e.g. `cart-fix #1 a` · `loyalty-csv a yes`
+> type e.g. `cart-fix #1 a` · `loyalty-csv #1 yes`
 
 Every card reads the same way: a symbol for what happened (`✓` done, **?** a question, `◷` a
 dialog waiting in the worker's pane, `✗` failed), the task and where it works, then the question
-alone in bold or the result in one line, and what waits for you lettered under it. `▶` comes last
-and lists everything you can answer, each letter with a few words saying what it is and `★` on
-the worker's pick, then a reply you can type as it is. When two or more things wait, a short
-table on top lists them.
+alone in bold or the result in one line, and what waits for you numbered under it. `▶` comes last
+and reads like an exam paper: a number for each thing to answer, letters for the choices under
+it, each letter with a few words saying what it is and `★` on the worker's pick, then a reply
+you can type as it is. One reply can answer several numbers of a worker; it goes to the worker
+as one message. When two or more workers wait, a short table on top lists them.
 
 ![The path of a question: the worker writes it to a status log, a watcher sees the new line and wakes the coordinator, which asks you; your answer goes back through the coordinator to the worker](docs/mcv-question.svg)
 

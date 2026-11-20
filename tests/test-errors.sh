@@ -113,6 +113,30 @@ cp "$H" "$root/loose/mcv-herdr.sh"
 out="$("$root/loose/mcv-herdr.sh" doctor 2>&1)"; rc=$?
 expect "a copy with no plugin.json beside it still passes, version unknown" \
   '[[ $rc -eq 0 && "$(jq -r .mcv <<<"$out")" == unknown ]]' "rc=$rc $out"
+# Claude Code keeps every installed version in a folder of its own and a
+# running session keeps the folder it started with, through /clear too
+# (measured in real transcripts: 9 of 69 workers were started by a
+# coordinator one or more versions behind them, and one session stayed on
+# 0.3.2 after /clear with 0.3.3 installed). The copy that runs can see the
+# newer folder beside it, and says so in words that need no rule to read.
+mkdir -p "$root/cache/1.0.9/.claude-plugin" "$root/cache/0.9.20/.claude-plugin"
+cp -R "$BIN" "$root/cache/1.0.9/bin"
+echo '{"version":"1.0.9"}' >"$root/cache/1.0.9/.claude-plugin/plugin.json"
+echo '{"version":"0.9.20"}' >"$root/cache/0.9.20/.claude-plugin/plugin.json"
+out="$("$root/cache/1.0.9/bin/mcv-herdr.sh" doctor 2>&1)"; rc=$?
+expect "the newest installed copy says nothing more" \
+  '[[ $rc -eq 0 && "$(jq -r .mcv <<<"$out")" == 1.0.9 && "$(jq -r "has(\"note\")" <<<"$out")" == false ]]' "rc=$rc $out"
+mkdir -p "$root/cache/1.0.10/.claude-plugin" "$root/cache/notes"
+echo '{"version":"1.0.10"}' >"$root/cache/1.0.10/.claude-plugin/plugin.json"
+out="$("$root/cache/1.0.9/bin/mcv-herdr.sh" doctor 2>&1)"; rc=$?
+expect "with a newer copy installed beside it, doctor says which and what to do" \
+  '[[ $rc -eq 0 && "$(jq -r .ok <<<"$out")" == true && "$(jq -r .note <<<"$out")" == *"1.0.10"*"1.0.9"*"start it again"* ]]' "rc=$rc $out"
+out="$("$H" doctor 2>&1)"
+expect "a checkout that is no installed copy says nothing more" '[[ "$(jq -r "has(\"note\")" <<<"$out")" == false ]]' "$out"
+out="$("$root/cache/1.0.9/bin/mcv-herdr.sh" spawn acme old1 "$repo" fix/old1 2>&1)"; rc=$?
+expect "spawn from the older copy says it too, where a newer worker starts" \
+  '[[ $rc -eq 0 && "$(jq -r .task <<<"$out")" == acme/old1 && "$(jq -r .note <<<"$out")" == *"1.0.10"* ]]' "rc=$rc $out"
+"$root/cache/1.0.9/bin/mcv-herdr.sh" remove acme/old1 >/dev/null 2>&1
 out="$(FAKE_STATUS="$(st 0.10.0-beta 0.10.0-beta)" "$H" doctor 2>&1)"; rc=$?
 expect "doctor accepts a version with a suffix" '[[ $rc -eq 0 ]]' "rc=$rc $out"
 out="$(FAKE_STATUS="$(st 0.9.4 0.9.4)" "$H" doctor 2>&1)"; rc=$?

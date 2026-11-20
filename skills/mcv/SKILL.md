@@ -4,7 +4,7 @@ description: Coordinate several Claude Code sessions on one project from this on
 license: MIT
 user-invocable: true
 metadata:
-  version: "0.3.3"
+  version: "0.3.4"
   type: action
   status: experimental
   stack: any (needs herdr >= 0.9.5 with its Claude integration current, jq, git; this session must run inside a herdr pane)
@@ -155,7 +155,7 @@ versions `doctor` printed and the number of tasks under `$MCV_HOME/<project>/tas
 **`mcv`** <mcv> · <project> · herdr <herdr> · <n> workers
 ```
 
-For example **`mcv`** `0.3.3 · shop · herdr 0.9.5 · 0 workers`, the word `mcv` bold inside a code
+For example **`mcv`** `0.3.4 · shop · herdr 0.9.5 · 0 workers`, the word `mcv` bold inside a code
 span as written here. Never write a version from memory or
 from this file; if `mcv` is `unknown`, show it as it is. The status table's header carries the
 same version.
@@ -272,9 +272,9 @@ text. Lines that start with `|` under a `WAITING` are the dialog as the worker's
 | `WAITING` | The worker stopped at a dialog on its screen. The lines under the event that start with `|` are that dialog: describe from them, in plain words, what it wants (which command, which file, which question) and which answers it offers, and ask the user. A long dialog comes as its top and its bottom, with a line between saying how many lines are left out. `read` its screen only when no such lines came or they do not say what is asked. Never approve it yourself; in this version the user approves or denies in the worker's herdr pane. If it is the folder trust question of a worker whose `spawn` just failed and you already asked about it, it is the same dialog: do not ask again. |
 | `RESUMED` | The dialog is gone: the user answered it in the worker's pane. Stop asking them about it; say in one line that the worker went on. |
 | `STOPPED` | The worker's turn ended without a report, or a wait it announced (`waiting` in its log) has lasted past the watcher's limit. This is not "finished". `read` its screen. If it is still waiting on something that is running, say nothing, or one line if the user is waiting on it; if what it waits on has died or hangs, tell the user. If it asked something in plain text, relay that as a question labelled `<id> (on screen)`. Report a task as finished only on `DONE`. It does not come for a worker that has reported (a question, `DONE`, `FAILED`, `BLOCKED`) and been sent nothing since: such a turn end, Claude compacting an idle worker say, changes nothing. |
-| `DONE · <text>` | Relay it as a result card (below): the result, and after ` ¶ ` what waits for the user (`needs a: ...`), what was checked and what is left. Offer removing the worker; do not remove it unasked. Start the next waiting worker, if any, and say so in the line under the mcv line. |
+| `DONE · <text>` | Relay it as a result card (below): the result, and after ` ¶ ` what waits for the user (`needs q2: ...`), what was checked and what is left. Offer removing the worker; do not remove it unasked. Start the next waiting worker, if any, and say so in the line under the mcv line. |
 | `FAILED · <text>` | Report the reason and ask what to do next. Start the next waiting worker, if any. |
-| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 2 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait --answers qN`, which records it; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; send it with `--answers qN` on a yes, or if the user drops it record `mcv-status --task <project>/<id> answered qN "dropped by the user"`. If the output says `queued`, the worker was busy again and the answer is kept once more. A `DELIVER` comes once per pending line. `DELIVER oN · <order>` is an order the user gave while the worker was busy ("Sending an order" below): `read` its screen and send it with `prompt --no-wait --answers oN`, unless what it asked for is already done (then tell the user and record `mcv-status --task <project>/<id> answered oN "already done"`). |
+| `DELIVER qN · <answer>` | The worker has stopped, and the user's answer to `<id> #N` is still waiting to be sent (step 2 below). `read` its screen. If it is still waiting on that question, send this exact answer with `prompt --no-wait --answers qN`, which records it; do not ask the user again. If it has moved on (asked something else, or reported done), the answer was not given in its pane: tell the user, and ask whether to send it anyway, saying it answers `<id> #N`; send it with `--answers qN` on a yes, or if the user drops it record `mcv-status --task <project>/<id> answered qN "dropped by the user"`. If the output says `queued`, the worker was busy again and the answer is kept once more. A `DELIVER` comes once per pending line; one whose text is `with qM` was queued together with `qM`, and goes in the same send (`--answers qM --answers qN`). `DELIVER oN · <order>` is an order the user gave while the worker was busy ("Sending an order" below): `read` its screen and send it with `prompt --no-wait --answers oN`, unless what it asked for is already done (then tell the user and record `mcv-status --task <project>/<id> answered oN "already done"`). |
 | `GONE` | The worker is no longer running Claude: its pane was closed, or Claude exited in it. Tell the user; its task and branch remain; offer `remove`. If an answer to it is still pending, say it was never delivered. Start the next waiting worker, if any. |
 
 If `prompt` says a worker is not running Claude any more, handle it like `GONE`: `read` its screen
@@ -285,9 +285,8 @@ you know.
 
 ### How mcv looks to the user
 
-mcv marks what it shows with the word `mcv`, never a symbol: Claude Code and herdr put a round dot
-before a line, so a round symbol read as two circles, and at the terminal's size a symbol's detail
-was lost (seen with 0.3.2's `⍉` and the `❐` tried after it). In your own messages write it
+mcv marks what it shows with the word `mcv`, never a symbol (after the round dot Claude Code and
+herdr put before a line, a symbol read badly). In your own messages write it
 **`mcv`**, bold inside a code span: Claude Code shows that bold and in the code colour at once
 (seen). The body of a message is in the user's language; the word mcv, the ids, the event words
 and what the user types back stay as written here. No boxes or rules drawn around a message: characters with combining marks break
@@ -296,32 +295,42 @@ their alignment.
 **A message that relays events** has one shape, so the eye finds the same things in the same
 places every time:
 
-1. **The mcv line, always first,** even for one event: **`mcv`** `· <how many workers wait for
-   the user>`, in the user's language (**`mcv`** `· 2 things wait for you`); a worker counts once,
-   however many lettered items it has. The word is on this line only, not on each card, so the
-   status symbols below have the left edge to themselves.
+1. **The mcv line, always first,** even for one event: **`mcv`** `· <how many things wait for
+   the user>`, in the user's language (**`mcv`** `· 3 things wait for you`): every numbered thing
+   counts, so the number is the one `▶` gives. The word is on this line only, not on each card,
+   so the status symbols below have the left edge to themselves.
 2. **One line of your own, if you have one,** right under the mcv line: the next waiting worker
    you started, a risk you see. Never after the cards.
-3. **When two or more things wait,** a short table: worker, state, what the user does, a few
-   words per cell. It is the one table allowed in a relay.
+3. **When two or more workers wait,** a short table: worker, state, what the user does (its
+   numbers and a few words: `#2 look at the page · #3 file an issue?`). It is the one table
+   allowed in a relay.
 4. **One card per event.**
 5. **`▶` last,** with what to type for everything that waits, or "▶ nothing to do". Nothing
-   comes after it. A letter never stands alone: each one carries a label of two to four words,
-   cut from its option or item, and `★` follows the one the worker recommends, so the user can
-   answer without scrolling back to a card (seen: `▶ lot55-714 #1 a · #2 a or b · #3 a or b or c`
-   left the user unable to tell what any letter meant). One thing to answer fits one line:
+   comes after it. It reads like an exam paper: a number for each thing to answer, letters for
+   the choices under it, and nothing else is ever numbered or lettered. A worker numbers its
+   questions and the things its results leave to the user in one row (`#1`, `#2`, ... from the
+   ids `q1`, `q2`), so `cart-fix #3` is one thing for as long as the task lives. A letter never
+   stands alone: each carries a label of two to four words cut from its option, and `★`
+   follows the one the worker recommends, so the user can answer without scrolling back (seen:
+   bare letters, and letters used for both choices and things to do, left the user unable to
+   answer). A thing with no
+   choices says what to reply (`ok` once you have looked, `yes` · `no`), the same words each
+   time it is shown. One thing to answer fits one line:
    `` ▶ `cart-fix #1` a per drink ★ · b per order ``. More than one makes `▶` a heading with one
-   line per question or item, then one line with a whole reply in the form that works, the
-   recommended letters filled in:
+   line each, then one line with a whole reply in the form that works, the recommended letters
+   filled in:
 
    ```
    ▶ answer 3
    - **lot55-714 #1** save button: `a` top right ★ · `b` bottom left
    - **lot55-714 #2** old data: `a` move it ★ · `b` drop it
-   - **loyalty-csv a** old bug, file an issue: `yes` · `no`
+   - **loyalty-csv #2** old bug, file an issue: `yes` · `no`
 
-   type e.g. `lot55-714 #1 a #2 a` · `loyalty-csv a yes`
+   type e.g. `lot55-714 #1 a #2 a` · `loyalty-csv #2 yes`
    ```
+
+   Something still unanswered from an earlier message is listed again here in full when a new
+   event comes, so no message leans on one above it.
 
 A card starts with its status symbol, then the task in bold, then `repo:branch` in one code span,
 so two workers in the same repo never look alike: `` ✓ **cart-fix** · `web:fix/cart-total` ``. The
@@ -371,36 +380,33 @@ The worker recommends **a**
   next to it: show the card again with your course as one more letter.
 - A question with no options has nothing to choose from: its part of the `▶` line is
   "`cart-fix #1` and your answer".
-- A question that came as one paragraph, with no ` ¶ ` (a worker running an older mcv): put its
-  question in bold, the rest under it as it is, and letter the options it names yourself. If it
-  holds two decisions, letter the second one's options on from the first's (`a b` then `c d`)
-  and ask for both, each letter with its label as above.
 
-A result comes the same way: the result, then `needs a: ...` (one per thing the user must decide
-or do), `checked: ...` and `left: ...`. The result is one line. The `needs` items come next,
-under a bold "Waits for you", each with its letter, whole and in order, never cut. `checked` and
+A result comes the same way: the result, then `needs q2: ...` (one per thing the user must
+decide or do, numbered on from the task's questions), `checked: ...` and `left: ...`. The result
+is one line. The `needs` items come next, under a bold "Waits for you", each with its number
+(`#2`), whole and in order, never cut. `checked` and
 `left` come last, on two lines of their own, each at most about 100 characters: name what was
 checked and what is left, not every number and file (`Checked: gates, full test run, new tests
 fail on the old code`); keep a fact that changes what the user does next (`not checked on
 screen`). The full text stays in the task's `status.log` for when the user asks. Leave out what is missing. A result from a worker on an
-older mcv has no `needs`: when its `left` holds something the user must decide (a risk, an issue
-to file), move that into "Waits for you" and letter it yourself.
+older mcv letters its `needs` (`needs a: ...`) or has none: show them under "Waits for you"
+without a number, and send a reply to one as an order.
 
 ```
-**`mcv`** · 2 things wait for you
+**`mcv`** · 3 things wait for you
 
 | worker | state | you |
 |---|---|---|
-| cart-fix | ✓ done | a look at the page · b file an issue? |
-| loyalty-csv | **?** #1 | choose a or b |
+| cart-fix | ✓ done | #1 look at the page · #2 file an issue? |
+| loyalty-csv | **?** | #1 per member or per visit |
 
 ✓ **cart-fix** · `web:fix/cart-total`
 
 Result: draft merge request web!12, the cart total adds the surcharge per drink
 
 **Waits for you**
-- **a** look at the before and after page `.claude/before-after/cart/index.html`
-- **b** an old bug: the receipt total rounds twice; file an issue?
+- **#1** look at the before and after page `.claude/before-after/cart/index.html`
+- **#2** an old bug: the receipt total rounds twice; file an issue?
 
 Checked: unit tests, total compared with the till
 Left: pipeline still running
@@ -413,11 +419,11 @@ Left: pipeline still running
 - **b** per visit → much larger file
 
 ▶ answer 3
-- **cart-fix a** before and after page: `ok` when you have looked
-- **cart-fix b** receipt bug, file an issue: `yes` · `no`
+- **cart-fix #1** before and after page: `ok` when you have looked
+- **cart-fix #2** receipt bug, file an issue: `yes` · `no`
 - **loyalty-csv #1** export: `a` per member ★ · `b` per visit
 
-type e.g. `cart-fix a ok b yes` · `loyalty-csv #1 a`
+type e.g. `cart-fix #1 ok #2 yes` · `loyalty-csv #1 a`
 ```
 
 After a `DONE` with nothing waiting, the `▶` line offers removing the worker:
@@ -460,7 +466,7 @@ cart-fix's screen`. Never leave the description to show the helper's full path.
 **Where things stand.** One header line, then a table:
 
 ```
-mcv 0.3.3 · shop · 2 workers
+mcv 0.3.4 · shop · 2 workers
 
   worker       repo  branch              state      since  you
   cart-fix     web   fix/cart-total      QUESTION   3m     answer #1
@@ -481,7 +487,11 @@ the user cannot find one, name that repo.
    send the answer with one command, which also records it:
    `BIN/mcv-herdr.sh prompt <project>/<id> "<answer to <id> #<n>: ...>" --no-wait --answers q<n>`.
    Send the option's words with its letter (`b: once per order`), never the letter alone: the
-   worker and the log must not depend on a card they cannot see. Read the output:
+   worker and the log must not depend on a card they cannot see. A reply to several numbers
+   of one worker goes in one send: one text that names each (`#1 b: once per order. #2 yes,
+   file the issue`), with `--answers` once for each id; never one send per number, which
+   queues the later ones behind the first (seen: three answers took six sends). A thing a
+   result left to the user (`needs q<n>`) is answered the same way. Read the output:
    - `"answered": "q<n>"`: it went in and the question is closed. Do not record it again.
    - `"queued": "q<n>"`: the worker was busy (it did not end its turn after asking), nothing was
      sent, and the answer is kept. Tell the user it goes in when the worker stops. Do not retry
@@ -506,10 +516,8 @@ that has stopped it is sent as it is. For a busy one nothing is sent and the out
 `"queued": "o1"`: the order is kept under that id; tell the user in one line that it goes in when
 the worker stops. It comes back as `DELIVER o1`, and you send it then with `--answers o1`.
 
-A reply to a lettered item under a result's "Waits for you" (`cart-fix a ok`, `cart-fix b yes`)
-is an order of this kind: send the item's words with the user's answer, never the letter alone
-(`a, the before and after page: looked, ok to delete`). An item the user only had to do
-themselves (look at a page) needs nothing sent unless it asks the worker to act afterwards.
+A thing under a result's "Waits for you" that the user only had to do themselves (look at a
+page) needs nothing sent unless the worker is to act on the reply.
 
 ### When the user asks where things stand
 

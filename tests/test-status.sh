@@ -403,16 +403,39 @@ out="$(MCV_TASK=shop/t5 "$S" "done" "Opened merge request web!12 into develop" \
 got="$(text5)"
 expect "done takes what was checked and what is left" \
   '[[ $rc -eq 0 && -z "$out" && "$got" == "Opened merge request web!12 into develop ¶ checked: tests pass; before and after pages captured ¶ left: the capture files, until you have seen the pages" ]]' "rc=$rc $out / $got"
-# What waits for the user goes apart from what is merely left, lettered, so
-# a decision is not buried in a list of loose ends (a real DONE on pps-web
-# had "lot 55 will hit the size ceiling" among four other "left" items).
-out="$(MCV_TASK=shop/t5 "$S" "done" "Opened merge request web!12" --needs "look at the before and after page" \
+# What waits for the user goes apart from what is merely left, so a decision
+# is not buried in a list of loose ends (a real DONE on pps-web had "lot 55
+# will hit the size ceiling" among four other "left" items). Each such thing
+# is numbered in the task's one row of question ids. Lettered a, b, c they
+# read like the options of a question, and each done started at a again: in
+# a real run "l2-dealer a" meant two things four minutes apart, and a relay
+# that mixed a question's letters with these made the user answer "confused".
+mkdir -p "$home/shop/tasks/t6"
+echo '{}' >"$home/shop/tasks/t6/meta"
+log6="$home/shop/tasks/t6/status.log"
+text6() { tail -1 "$log6" | cut -f4; }
+MCV_TASK=shop/t6 "$S" needs-decision "Per drink or per order?" >/dev/null
+out="$(MCV_TASK=shop/t6 "$S" "done" "Opened merge request web!12" --needs "look at the before and after page" \
   --needs "open an issue for the old Add Employee bug?" --checked "tests pass" --left "pipeline still running" 2>&1)"; rc=$?
-got="$(text5)"
-expect "done letters each --needs, after the result and before what was checked" \
-  '[[ $rc -eq 0 && -z "$out" && "$got" == "Opened merge request web!12 ¶ needs a: look at the before and after page ¶ needs b: open an issue for the old Add Employee bug? ¶ checked: tests pass ¶ left: pipeline still running" ]]' "rc=$rc $out / $got"
+got="$(text6)"
+expect "done numbers each --needs after the task's questions, before what was checked" \
+  '[[ $rc -eq 0 && -z "$out" && "$got" == "Opened merge request web!12 ¶ needs q2: look at the before and after page ¶ needs q3: open an issue for the old Add Employee bug? ¶ checked: tests pass ¶ left: pipeline still running" ]]' "rc=$rc $out / $got"
+q="$(MCV_TASK=shop/t6 "$S" needs-decision "Oat or soy?")"
+expect "the next question takes the number after them" '[[ "$q" == q4 ]]' "$q"
+MCV_TASK=shop/t6 "$S" "done" "Footer fixed too" --needs "say when the page can go" >/dev/null 2>&1
+expect "a second done goes on counting" '[[ "$(text6)" == "Footer fixed too ¶ needs q5: say when the page can go" ]]' "$(text6)"
+env -u MCV_TASK "$S" --task shop/t6 open q3 >/dev/null 2>&1; rc=$?
+expect "a thing the user must do can take an answer" '[[ $rc -eq 0 ]]' "rc=$rc"
+out="$(env -u MCV_TASK "$S" --task shop/t6 answered q3 "no issue" 2>&1)"; rc=$?
+expect "its answer is recorded under its id" \
+  '[[ $rc -eq 0 && "$(tail -1 "$log6" | cut -f2,3,4 | tr "\t" "|")" == "answered|q3|no issue" ]]' "rc=$rc $out"
+out="$(env -u MCV_TASK "$S" --task shop/t6 answered q3 "again" 2>&1)"; rc=$?
+expect "and only once" '[[ $rc -eq 1 && "$out" == *"already answered"* ]]' "rc=$rc $out"
+out="$(env -u MCV_TASK "$S" --task shop/t6 open q9 2>&1)"; rc=$?
+expect "an id nothing was given is still refused" '[[ $rc -eq 1 && "$out" == *"no question q9"* ]]' "rc=$rc $out"
 out="$(MCV_TASK=shop/t5 "$S" "done" "x" --needs 1 --needs 2 --needs 3 --needs 4 --needs 5 --needs 6 --needs 7 2>&1)"; rc=$?
-expect "at most six --needs" '[[ $rc -eq 2 && "$out" == *"--needs"* ]]' "rc=$rc $out"
+expect "at most six --needs, and the refusal does not send a decision to --left" \
+  '[[ $rc -eq 2 && "$out" == *"--needs"* && "$out" != *"--left"* ]]' "rc=$rc $out"
 out="$(MCV_TASK=shop/t5 "$S" "done" "x" --needs "  " 2>&1)"; rc=$?
 expect "an empty --needs is refused" '[[ $rc -eq 2 && "$out" == *"--needs"* ]]' "rc=$rc $out"
 out="$(MCV_TASK=shop/t5 "$S" needs-decision "Ship it?" --needs "x" 2>&1)"; rc=$?
