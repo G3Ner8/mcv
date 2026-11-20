@@ -11,12 +11,14 @@
 #   mcv-status blocked <text>          cannot continue
 #   mcv-status done <result> [--needs <text>]... [--checked <text>] [--left <text>]
 #                                      the task is finished: each thing the user must
-#                                      decide or do (lettered a to f, at most six), what
-#                                      was verified, and what is not done
+#                                      decide or do (at most six in one done, each given
+#                                      the task's next question id), what was verified,
+#                                      and what is not done
 # The parts go into the event's text after the question or the result, each
 # after " ¶ ": "why: ...", "a: <label> => <what follows>", "recommends: a",
-# "needs a: ...", "checked: ...", "left: ...". A ¶ in the worker's own words
-# becomes a space.
+# "needs q2: ...", "checked: ...", "left: ...". A ¶ in the worker's own words
+# becomes a space. Questions and a done's needs share the task's one row of
+# ids, so a needs item is open, pending and answered like a question.
 #   mcv-status failed <text>           giving up, with the reason
 #   mcv-status note <text>             progress worth knowing; needs no answer and
 #                                      wakes nobody (status table only)
@@ -215,11 +217,36 @@ part() {
   printf '%s' "${text//¶/ }"
 }
 
+# Print the highest question number in log $1, 0 when there is none. A
+# task's questions and the things a done says the user must do share one
+# row of numbers, so "#3" names one thing for as long as the task lives.
+# The second kind has no line of its own: it is a part of its done line.
+last_q() {
+  [[ -f "$1" ]] || { printf '0'; return 0; }
+  awk -F'\t' '
+    $2 == "needs-decision" { v = substr($3, 2) + 0; if (v > m) m = v }
+    $2 == "done" {
+      n = split($4, a, " ¶ needs q")
+      for (i = 2; i <= n; i++) { v = a[i] + 0; if (v > m) m = v }
+    }
+    END { print m + 0 }' "$1"
+}
+
+# True when log $1 holds question $2: asked with needs-decision, or given by
+# a done as a thing the user must decide or do.
+asked() {
+  [[ -f "$1" ]] || return 1
+  awk -F'\t' -v q="$2" '
+    $2 == "needs-decision" && $3 == q { found = 1 }
+    $2 == "done" && index($4 " ", " ¶ needs " q ": ") { found = 1 }
+    END { exit !found }' "$1"
+}
+
 # Print the text of a needs-decision or a done ($1) from its arguments: the
 # question or the result, then each part after " ¶ ", options lettered here
-# so two questions never letter them differently. The coordinator shows the
-# parts as they are; a paragraph it had to cut down itself was the long,
-# hard-to-read card.
+# so two questions never letter them differently, and a done's --needs
+# numbered from NEEDS_BASE + 1. The coordinator shows the parts as they are;
+# a paragraph it had to cut down itself was the long, hard-to-read card.
 with_parts() {
   local kind="$1" head="" why="" checked="" left="" rec="" into=head out
   local n=0 i letters=abcdef nn=0
@@ -235,7 +262,7 @@ with_parts() {
     case "$1" in
       --needs)
         if [[ $# -lt 2 ]] || ! has_text "$2"; then usage "--needs needs some text after it"; fi
-        (( nn < ${#letters} )) || usage "at most ${#letters} --needs; put the rest in --left"
+        (( nn < ${#letters} )) || usage "at most ${#letters} --needs in one done; join the ones that belong together"
         needs[nn]="$(part "$2")"
         nn=$((nn + 1))
         into=needs
@@ -292,7 +319,7 @@ with_parts() {
   [[ -z "$rec" ]]     || out="$out ¶ recommends: $rec"
   i=0
   while (( i < nn )); do
-    out="$out ¶ needs ${letters:i:1}: ${needs[i]}"
+    out="$out ¶ needs q$(( ${NEEDS_BASE:-0} + i + 1 )): ${needs[i]}"
     i=$((i + 1))
   done
   [[ -z "$checked" ]] || out="$out ¶ checked: $checked"
@@ -648,7 +675,7 @@ case "${1:-}" in
       if [[ ! -f "$log" ]] || ! cut -f2,3 "$log" | grep -qxF "pending"$'\t'"$qid"; then
         die "no order $qid in task $2; queue one with pending -"
       fi
-    elif [[ ! -f "$log" ]] || ! cut -f2,3 "$log" | grep -qxF "needs-decision"$'\t'"$qid"; then
+    elif ! asked "$log" "$qid"; then
       die "no question $qid in task $2"
     fi
     if [[ "$3" == amended ]]; then
@@ -690,11 +717,16 @@ case "${1:-}" in
     fi
     log="$(log_of "$MCV_TASK")" || exit 1
     lock_log "$log"
+    n="$(last_q "$log")"
     if [[ "$1" == needs-decision ]]; then
-      n=1
-      [[ -f "$log" ]] && n=$(( $(cut -f2 "$log" | grep -cx needs-decision || true) + 1 ))
+      n=$((n + 1))
       append "$log" needs-decision "q$n" "$text"
       printf 'q%d\n' "$n"
+    elif [[ "$1" == "done" ]]; then
+      # Numbered only now, under the lock: a question asked meanwhile has
+      # taken the next number.
+      text="$(NEEDS_BASE="$n" with_parts "$@")" || exit 2
+      append "$log" "done" - "$text"
     else
       append "$log" "$1" - "$text"
     fi

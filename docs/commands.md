@@ -19,7 +19,8 @@ plugin Claude Code runs. Call it by its full path, either by asking Claude to ru
 after `!` in Claude Code. Below, `H` stands for that path.
 
 ```
-H doctor                                     # herdr, its server, the integration, jq; prints mcv's version
+H doctor                                     # herdr, its server, the integration, jq; prints mcv's version,
+                                             # and a note when a newer one is installed (spawn says it too)
 H spawn brewly cart-fix ~/code/brewly/web fix/cart-total
                                              # new worktree on new branch fix/cart-total, idle Claude in it
 H prompt brewly/cart-fix "The cart total ignores the oat-milk surcharge; fix it"
@@ -104,7 +105,10 @@ the worker said.
   (`--order`): then nothing is sent, the text is kept as pending, to be sent when the worker
   stops, and the output says `queued`.
 - **`--answers q<n>`** sends an answer and records it: as answered when it went in, as pending
-  when the worker is busy. `--order` does the same for an order that answers nothing.
+  when the worker is busy. `--order` does the same for an order that answers nothing. Given
+  more than once (`--answers q1 --answers q2`), one text answers several ids in one send: the
+  first id's line in the log holds the text, the others say `with q1`. One id that cannot take
+  an answer, or an id named twice, refuses the whole send.
 - **A worker that has not received mcv's rules is refused,** since it would never report its
   questions (the rules: [Git rules for workers](../README.md#git-rules-for-workers)). Usually it
   is still at the folder trust dialog: pick "Yes" there and prompt again. Otherwise its Claude
@@ -171,7 +175,8 @@ Both sit next to `mcv-herdr.sh`. Run either with no arguments for its usage.
   `needs-decision "<question>" --why "<background>" --option "<label>" "<what follows>" ...
   --recommend <letter>` and `done "<result>" --needs "<text>" ... --checked "<text>" --left
   "<text>"`. The options are lettered `a` to `f` in the order given: two or more, or none. Each
-  `--needs` is one thing the user must decide or do, lettered `a` to `f` the same way (at most
-  six); `--left` is only for what needs nothing from the user.
+  `--needs` is one thing the user must decide or do (at most six in one `done`). It takes the
+  task's next question id (`needs q2: ...`), so questions and these share one row of numbers
+  and are answered the same way; `--left` is only for what needs nothing from the user.
 - `mcv-status --task <project>/<id> answered q<n> "<why>"` closes a question when nothing is sent
   (you answered in the worker's pane), and `amended` records a correction sent after an answer.

@@ -4,6 +4,52 @@ All notable changes to mcv are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and mcv uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.4] - 2026-11-20
+
+From the logs of 63 real tasks on two projects, 16 to 20 November, and a test pass over 0.3.3.
+
+### Fixed
+
+- Every event line of 0.3.3 lacked the space after the word: `mcvcart-fix · DONE · ...` for
+  `mcv cart-fix · DONE · ...`. The space was lost when the mark was replaced, and the tests had
+  been changed to expect the same wrong line, so they passed.
+- `prompt --answers`, given twice, sent the text once and recorded only the last id: the worker
+  had both answers and the log one. `--answers` may now be given once for each id the text
+  answers. It is sent once; the first id's line holds the text and the others say `with q1`.
+  Measured: in 13 cases the user answered two or more questions of one worker together; each
+  went as a send of its own, the later ones were queued behind the first (three answers took
+  six sends), and a coordinator recorded two of them by hand.
+- After an update the README said to `/clear` and type `/mcv` again. That does not switch
+  versions: a running Claude Code keeps the plugin folder it started with (seen: a session
+  stayed on 0.3.2 through `/clear` with 0.3.3 installed, and 9 of 69 workers were started by a
+  coordinator one or more versions behind them). The README now says to quit Claude Code and
+  start it again, and from this version on the older copy says so itself: `doctor` and `spawn`
+  add a `note` to their output when a newer mcv is installed beside the one that runs.
+
+### Changed
+
+- What waits for the user reads like an exam paper: a number for each thing to answer, letters
+  only for the choices under it. A `done`'s `--needs` items were lettered `a` to `f`, like the
+  options of a question, and each `done` began at `a` again: one relay held `lot55-714 #1 a`
+  (a choice) beside `l2-dealer a ok` (a thing to do), `l2-dealer a` meant two things four
+  minutes apart, and the user answered "confused". Each `--needs` now takes the task's next
+  question id (`needs q2: ...`), is shown as `#2`, and is answered with `--answers q2` like a
+  question, so it can be queued for a busy worker and its answer is on record. A thing with no
+  choices says what to reply, in the same words each time it is shown.
+- The first line of a relay counts the things that wait, not the workers, so it gives the same
+  number as `▶`; the table lists numbers, not letters; and something still unanswered is listed
+  again under `▶` when a new event comes.
+- The refusal of a seventh `--needs` no longer says to put the rest in `--left`, which the
+  worker's rules forbid.
+
+### Not yet tried for real
+
+- The numbered shape with a real coordinator and worker: the tests cover the ids and the
+  sends, and the relay rules were probed once, on two results and two questions in one batch
+  (numbers for all six things, letters only under the two questions).
+- The note about a newer version: tested against folders laid out like Claude Code's plugin
+  cache, not by updating a running session.
+
 ## [0.3.3] - 2026-11-20
 
 ### Changed

@@ -86,7 +86,9 @@ state); mcv keeps the bookkeeping (which task each worker has, its questions and
    `<id> #<n>`, reads the worker's screen, and sends the answer with
    `prompt --no-wait --answers q<n>`. `prompt` records what became of it, through `mcv-status`:
    `answered` once the text is sent, `pending` when the worker is busy, and the watcher prints a
-   pending answer back as `DELIVER` when the worker stops. An order that answers no question
+   pending answer back as `DELIVER` when the worker stops. One text may answer several ids
+   (`--answers` once for each), sent once; until 0.3.4 each id took a send of its own, and in
+   13 real cases the later ones queued behind the first. An order that answers no question
    takes the same path with `--order`: a busy worker gets nothing and the order is queued under
    a new order id (`o1`, ...), picked under the log's lock. Sending and recording were two
    commands until 0.2.10; in real runs they were joined with `;` in 13 of 34 calls, and one
@@ -141,8 +143,9 @@ files from `.worktreeinclude`), `created` (UTC).
 `answered`, `amended` (the coordinator's). Text has tabs, newlines and other control characters
 removed. A `needs-decision` and a `done` hold their parts in that text, each after ` ¶ `: the
 question, `why: ...`, the options `a: <label> => <what follows>` (lettered by `mcv-status`, two
-to six, or none) and `recommends: <letter>`; the result, `needs a: ...` (each thing the user must
-decide or do, lettered by `mcv-status`, at most six), `checked: ...` and `left: ...`. A `¶`
+to six, or none) and `recommends: <letter>`; the result, `needs q2: ...` (each thing the user
+must decide or do, at most six in one `done`, given the task's next question id by `mcv-status`
+so that it is open, pending and answered like a question), `checked: ...` and `left: ...`. A `¶`
 in the worker's own words is turned into a space, so a part cannot be faked. The coordinator
 places the parts in a card and cuts nothing from a question or a `needs` item; `checked` and
 `left` it may cut to one line each, as the full text stays in the log. Question ids are `q1`, `q2`, ... per task, and order ids `o1`, `o2`, ... A question is

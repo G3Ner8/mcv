@@ -151,7 +151,7 @@ emit() {
     *)              label="$(printf '%s' "$kind" | tr '[:lower:]' '[:upper:]')"; text="$f5" ;;
   esac
   local out
-  out="$(say_event "mcv${task#*/} · $label" "$text"; [[ -z "$dialog" ]] || printf '%s\n' "$dialog")"
+  out="$(say_event "mcv ${task#*/} · $label" "$text"; [[ -z "$dialog" ]] || printf '%s\n' "$dialog")"
   # The Monitor tool joins lines that come within 200 ms into one
   # notification and cuts that at about 3000 characters, saying nothing
   # (measured: of two 1500-character questions in one poll, the end of the

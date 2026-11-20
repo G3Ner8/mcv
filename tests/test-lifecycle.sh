@@ -437,5 +437,38 @@ before="$(cat "$log")"
 "$ST" --task ans/a1 open q3 >/dev/null 2>&1
 expect "mcv-status open writes nothing" '[[ "$(cat "$log")" == "$before" ]]'
 
+# One text may answer several questions. Measured on real runs: in 13 of
+# them the user answered two or more questions of one worker together; each
+# went as a send of its own, the later ones were queued behind the first
+# (three answers took six sends), and a coordinator recorded two of them by
+# hand. Given twice, --answers used to take the last id and say nothing:
+# the worker had both answers, the log one.
+"$H" spawn ans a2 "$repo" fix/a2 >/dev/null 2>&1
+log="$MCV_HOME/ans/tasks/a2/status.log"
+MCV_TASK=ans/a2 "$ST" needs-decision "Per drink or per order?" >/dev/null
+MCV_TASK=ans/a2 "$ST" needs-decision "Oat or soy?" >/dev/null
+MCV_TASK=ans/a2 "$ST" "done" "Cart fixed" --needs "look at the page" >/dev/null
+calls="$(wc -l <"$FAKE_DIR/calls")"
+out="$("$H" prompt ans/a2 "x" --answers q1 --answers q9 --no-wait 2>&1)"; rc=$?
+expect "several ids: one that was never asked refuses the whole send" \
+  '[[ $rc -eq 1 && "$out" == *"no question q9"* && "$(wc -l <"$FAKE_DIR/calls")" -eq "$calls" && "$(kinds)" != *"answered"* ]]' "rc=$rc $out $(kinds)"
+out="$("$H" prompt ans/a2 "x" --answers q1 --answers q1 --no-wait 2>&1)"; rc=$?
+expect "the same id twice is refused" '[[ $rc -eq 1 && "$out" == *"twice"* ]]' "rc=$rc $out"
+out="$(FAKE_AGENT_STATE=working "$H" prompt ans/a2 "#1 b: per order. #2 a: oat" --answers q1 --answers q2 --no-wait 2>&1)"; rc=$?
+expect "several ids to a busy worker: all are queued, in one go" \
+  '[[ $rc -eq 0 && "$(jq -r .queued <<<"$out" 2>/dev/null)" == "q1 q2" && "$(kinds)" == *"pending q1,pending q2,"* ]]' "rc=$rc $out $(kinds)"
+expect "the text is kept once, the others point at it" \
+  '[[ "$(awk -F"\t" "\$3 == \"q1\" && \$2 == \"pending\" { print \$4 }" "$log")" == "#1 b: per order. #2 a: oat" \
+   && "$(awk -F"\t" "\$3 == \"q2\" && \$2 == \"pending\" { print \$4 }" "$log")" == "with q1" ]]' "$(cat "$log")"
+before_send="$(grep -c "agent prompt" "$FAKE_DIR/calls")"
+out="$("$H" prompt ans/a2 "#1 b: per order. #2 a: oat. #3 ok" --answers q1 --answers q2 --answers q3 --no-wait 2>&1)"; rc=$?
+expect "several ids to a stopped worker: one send answers them all, a thing to do among them" \
+  '[[ $rc -eq 0 && "$(jq -r .answered <<<"$out" 2>/dev/null)" == "q1 q2 q3" \
+   && "$(kinds)" == *"answered q1,answered q2,answered q3,"* \
+   && $(( $(grep -c "agent prompt" "$FAKE_DIR/calls") - before_send )) -eq 1 ]]' "rc=$rc $out $(kinds)"
+expect "the journal names every id" 'grep -qF "answered q1 q2 q3" "$j"' "$(tail -2 "$j")"
+expect "answered lines are kept the same way" \
+  '[[ "$(awk -F"\t" "\$2 == \"answered\" { print \$3 \"=\" \$4 }" "$log" | tr "\n" "|")" == "q1=#1 b: per order. #2 a: oat. #3 ok|q2=with q1|q3=with q1|" ]]' "$(cat "$log")"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]
